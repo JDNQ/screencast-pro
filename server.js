@@ -3,48 +3,67 @@ const path = require('path');
 const os = require('os');
 const http = require('http');
 const https = require('https');
+const crypto = require('crypto');
 const express = require('express');
 const { WebSocketServer, WebSocket } = require('ws');
 const QRCode = require('qrcode');
 const selfsigned = require('selfsigned');
-const { Bonjour } = require('bonjour-service');
 
 const HTTP_PORT = process.env.HTTP_PORT || 3000;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 
-// Find best local IPv4 address
+// Robust LAN IP detection: strictly filters out virtual adapters (WSL, Hyper-V, VMware, Radmin, etc.)
 function getLocalIpAddress() {
     const interfaces = os.networkInterfaces();
-    let preferredIp = '127.0.0.1';
-    
-    // Sort interfaces to prioritize Wi-Fi and Ethernet
-    const order = ['wi-fi', 'wifi', 'ethernet', 'en0', 'wlan0', 'eth0'];
-    
-    for (const pref of order) {
-        for (const name of Object.keys(interfaces)) {
-            if (name.toLowerCase().includes(pref)) {
-                for (const iface of interfaces[name]) {
-                    if (iface.family === 'IPv4' && !iface.internal) {
-                        return iface.address;
-                    }
-                }
+    const virtualKeywords = [
+        'vethernet', 'virtual', 'vmnet', 'vmware', 'hyper-v',
+        'wsl', 'radmin', 'tailscale', 'zerotier', 'loopback',
+        'bluetooth', 'pseudo', 'teredo', 'isatap'
+    ];
+
+    const isVirtual = (name) => {
+        const lower = name.toLowerCase();
+        return virtualKeywords.some(kw => lower.includes(kw));
+    };
+
+    const isUsableIp = (addr) => {
+        if (!addr || addr.family !== 'IPv4' || addr.internal) return false;
+        // Ignore APIPA (169.254) and Radmin VPN (26.)
+        if (addr.address.startsWith('169.254.') || addr.address.startsWith('26.')) return false;
+        return true;
+    };
+
+    // Priority 1: Physical Wi-Fi
+    for (const [name, addrs] of Object.entries(interfaces)) {
+        if (isVirtual(name)) continue;
+        const lower = name.toLowerCase();
+        if (lower.includes('wi-fi') || lower.includes('wifi') || lower.includes('wlan')) {
+            for (const addr of addrs) {
+                if (isUsableIp(addr)) return addr.address;
             }
         }
     }
-    
-    // Fallback: any non-internal IPv4 that isn't virtual (ignore 169.254, 26.)
-    for (const name of Object.keys(interfaces)) {
-        for (const iface of interfaces[name]) {
-            if (iface.family === 'IPv4' && !iface.internal) {
-                if (!iface.address.startsWith('169.254') && !iface.address.startsWith('26.')) {
-                    return iface.address;
-                }
-                preferredIp = iface.address;
+
+    // Priority 2: Physical Ethernet
+    for (const [name, addrs] of Object.entries(interfaces)) {
+        if (isVirtual(name)) continue;
+        const lower = name.toLowerCase();
+        if (lower.includes('ethernet') || lower.includes('eth0') || lower.includes('en0')) {
+            for (const addr of addrs) {
+                if (isUsableIp(addr)) return addr.address;
             }
         }
     }
-    
-    return preferredIp;
+
+    // Priority 3: Any non-virtual physical adapter
+    for (const [name, addrs] of Object.entries(interfaces)) {
+        if (isVirtual(name)) continue;
+        for (const addr of addrs) {
+            if (isUsableIp(addr)) return addr.address;
+        }
+    }
+
+    return '127.0.0.1';
 }
 
 const LAN_IP = getLocalIpAddress();
@@ -59,11 +78,30 @@ app.use('/', express.static(path.join(__dirname, 'public')));
 // Serve mobile client
 app.use('/mobile', express.static(path.join(__dirname, 'mobile-client')));
 
-// Active sessions: sessionId -> { receiverWs, senderWs, createdAt }
+// Active sessions: sessionId -> { receiverWs, senderWs, receiverToken, createdAt, lastActivity }
 const sessions = new Map();
+const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes TTL for inactive sessions
 
-function generateSessionId() {
-    return 'CAST-' + Math.floor(100000 + Math.random() * 900000);
+// Clean up stale sessions periodically to prevent memory leaks
+setInterval(() => {
+    const now = Date.now();
+    for (const [id, session] of sessions.entries()) {
+        const isIdle = !session.receiverWs && !session.senderWs;
+        if (isIdle && (now - session.lastActivity > SESSION_TTL_MS)) {
+            sessions.delete(id);
+            console.log(`[Session GC] Cleaned up expired session: ${id}`);
+        }
+    }
+}, 60 * 1000);
+
+function generateSecureSessionId() {
+    // Generate a secure 6-digit numeric PIN
+    const pin = crypto.randomInt(100000, 999999).toString();
+    return {
+        sessionId: 'CAST-' + pin,
+        pin,
+        receiverToken: crypto.randomBytes(16).toString('hex')
+    };
 }
 
 function normalizeSessionId(id) {
@@ -74,23 +112,24 @@ function normalizeSessionId(id) {
     return clean;
 }
 
-// API: Get server connection info and QR code
+// API: Get server connection info, PIN, and QR code
 app.get('/api/session/new', async (req, res) => {
-    const sessionId = generateSessionId();
-    const pin = sessionId.replace('CAST-', '');
+    const { sessionId, pin, receiverToken } = generateSecureSessionId();
     sessions.set(sessionId, {
         receiverWs: null,
         senderWs: null,
-        createdAt: Date.now()
+        receiverToken,
+        createdAt: Date.now(),
+        lastActivity: Date.now()
     });
 
-    // Mobile URL will use HTTPS so browser allows camera/screen capture APIs
-    const mobileUrl = `https://${LAN_IP}:${HTTPS_PORT}/mobile/?session=${sessionId}`;
-    const httpFallbackUrl = `http://${LAN_IP}:${HTTP_PORT}/mobile/?session=${sessionId}`;
-    const directMobileUrl = `https://${LAN_IP}:${HTTPS_PORT}/mobile`;
+    // Provide plain HTTP link for mobile browsers to avoid self-signed wss: rejection
+    const mobileHttpUrl = `http://${LAN_IP}:${HTTP_PORT}/mobile/?session=${sessionId}`;
+    const mobileHttpsUrl = `https://${LAN_IP}:${HTTPS_PORT}/mobile/?session=${sessionId}`;
+    const directMobileUrl = `http://${LAN_IP}:${HTTP_PORT}/mobile`;
     
     try {
-        const qrDataUrl = await QRCode.toDataURL(mobileUrl, {
+        const qrDataUrl = await QRCode.toDataURL(mobileHttpUrl, {
             errorCorrectionLevel: 'M',
             margin: 2,
             width: 320,
@@ -104,11 +143,12 @@ app.get('/api/session/new', async (req, res) => {
             success: true,
             sessionId,
             pin,
+            receiverToken,
             lanIp: LAN_IP,
             httpPort: HTTP_PORT,
             httpsPort: HTTPS_PORT,
-            mobileUrl,
-            httpFallbackUrl,
+            mobileUrl: mobileHttpUrl,
+            mobileHttpsUrl,
             directMobileUrl,
             qrCode: qrDataUrl
         });
@@ -124,6 +164,7 @@ app.get('/api/session/verify', (req, res) => {
 
     if (sessions.has(normalized)) {
         const session = sessions.get(normalized);
+        session.lastActivity = Date.now();
         res.json({
             success: true,
             sessionId: normalized,
@@ -133,12 +174,12 @@ app.get('/api/session/verify', (req, res) => {
     } else {
         res.status(404).json({
             success: false,
-            error: 'Mã kết nối không hợp lệ hoặc máy tính chưa sẵn sàng'
+            error: 'Mã kết nối không hợp lệ hoặc phiên đã hết hạn'
         });
     }
 });
 
-// API: Get IP and system info
+// API: System info
 app.get('/api/info', (req, res) => {
     res.json({
         lanIp: LAN_IP,
@@ -154,10 +195,22 @@ function setupWebSocket(wss) {
         let currentSessionId = null;
         let clientRole = null; // 'receiver' or 'sender'
 
-        ws.on('message', (message) => {
+        ws.on('message', (message, isBinary) => {
             try {
-                const data = JSON.parse(message);
-                const { type, sessionId, payload } = data;
+                // If message is binary (e.g. raw JPEG/H.264 frame from mobile/iOS extension), forward directly
+                if (isBinary) {
+                    if (!currentSessionId || !sessions.has(currentSessionId)) return;
+                    const session = sessions.get(currentSessionId);
+                    session.lastActivity = Date.now();
+                    const target = (clientRole === 'receiver') ? session.senderWs : session.receiverWs;
+                    if (target && target.readyState === WebSocket.OPEN) {
+                        target.send(message, { binary: true });
+                    }
+                    return;
+                }
+
+                const data = JSON.parse(message.toString());
+                const { type, sessionId, receiverToken, payload } = data;
 
                 switch (type) {
                     case 'register': {
@@ -166,23 +219,37 @@ function setupWebSocket(wss) {
                         
                         let session = sessions.get(currentSessionId);
                         if (!session) {
-                            session = { receiverWs: null, senderWs: null, createdAt: Date.now() };
+                            session = {
+                                receiverWs: null,
+                                senderWs: null,
+                                receiverToken: receiverToken || null,
+                                createdAt: Date.now(),
+                                lastActivity: Date.now()
+                            };
                             sessions.set(currentSessionId, session);
                         }
 
+                        session.lastActivity = Date.now();
+
                         if (clientRole === 'receiver') {
+                            // Verify token if session already has one
+                            if (session.receiverToken && receiverToken && session.receiverToken !== receiverToken) {
+                                ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized receiver token' }));
+                                ws.close();
+                                return;
+                            }
                             session.receiverWs = ws;
                             console.log(`[Session ${currentSessionId}] PC Receiver connected.`);
                             ws.send(JSON.stringify({ type: 'registered', role: 'receiver', sessionId: currentSessionId }));
                             
-                            // If sender is already waiting, notify both
+                            // If sender is waiting, notify both
                             if (session.senderWs && session.senderWs.readyState === WebSocket.OPEN) {
                                 session.receiverWs.send(JSON.stringify({ type: 'sender_ready' }));
                                 session.senderWs.send(JSON.stringify({ type: 'receiver_ready' }));
                             }
                         } else if (clientRole === 'sender') {
                             session.senderWs = ws;
-                            console.log(`[Session ${currentSessionId}] Mobile Sender connected via ID.`);
+                            console.log(`[Session ${currentSessionId}] Mobile Sender connected.`);
                             ws.send(JSON.stringify({ type: 'registered', role: 'sender', sessionId: currentSessionId }));
 
                             if (session.receiverWs && session.receiverWs.readyState === WebSocket.OPEN) {
@@ -194,9 +261,9 @@ function setupWebSocket(wss) {
                     }
 
                     case 'signal': {
-                        // Forward WebRTC signaling (offer, answer, candidate) to the opposite peer
                         const session = sessions.get(currentSessionId);
                         if (!session) return;
+                        session.lastActivity = Date.now();
 
                         const targetWs = (clientRole === 'receiver') ? session.senderWs : session.receiverWs;
                         if (targetWs && targetWs.readyState === WebSocket.OPEN) {
@@ -212,6 +279,7 @@ function setupWebSocket(wss) {
                     case 'stream_control': {
                         const session = sessions.get(currentSessionId);
                         if (!session) return;
+                        session.lastActivity = Date.now();
                         const targetWs = (clientRole === 'receiver') ? session.senderWs : session.receiverWs;
                         if (targetWs && targetWs.readyState === WebSocket.OPEN) {
                             targetWs.send(JSON.stringify({
@@ -238,6 +306,7 @@ function setupWebSocket(wss) {
         ws.on('close', () => {
             if (currentSessionId && sessions.has(currentSessionId)) {
                 const session = sessions.get(currentSessionId);
+                session.lastActivity = Date.now();
                 if (clientRole === 'receiver' && session.receiverWs === ws) {
                     session.receiverWs = null;
                     if (session.senderWs && session.senderWs.readyState === WebSocket.OPEN) {
@@ -249,34 +318,33 @@ function setupWebSocket(wss) {
                         session.receiverWs.send(JSON.stringify({ type: 'sender_disconnected' }));
                     }
                 }
-
-                if (!session.receiverWs && !session.senderWs) {
-                    setTimeout(() => {
-                        const s = sessions.get(currentSessionId);
-                        if (s && !s.receiverWs && !s.senderWs) {
-                            sessions.delete(currentSessionId);
-                        }
-                    }, 5 * 60 * 1000);
-                }
             }
         });
     });
 }
 
 async function start() {
-    // Setup SSL Certificate for HTTPS
+    // Setup SSL Certificate for HTTPS (regenerate if IP changed)
     let httpsOptions;
     const certDir = path.join(__dirname, '.cert');
     const certPath = path.join(certDir, 'cert.pem');
     const keyPath = path.join(certDir, 'key.pem');
+    const ipRecordPath = path.join(certDir, 'ip.txt');
 
-    if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-        httpsOptions = {
-            key: fs.readFileSync(keyPath),
-            cert: fs.readFileSync(certPath)
-        };
-    } else {
-        console.log('[Security] Generating self-signed TLS certificates for local HTTPS...');
+    let needNewCert = true;
+    if (fs.existsSync(certPath) && fs.existsSync(keyPath) && fs.existsSync(ipRecordPath)) {
+        const recordedIp = fs.readFileSync(ipRecordPath, 'utf8').trim();
+        if (recordedIp === LAN_IP) {
+            needNewCert = false;
+            httpsOptions = {
+                key: fs.readFileSync(keyPath),
+                cert: fs.readFileSync(certPath)
+            };
+        }
+    }
+
+    if (needNewCert) {
+        console.log(`[Security] Generating fresh TLS certificate for current IP: ${LAN_IP}...`);
         if (!fs.existsSync(certDir)) {
             fs.mkdirSync(certDir, { recursive: true });
         }
@@ -302,6 +370,7 @@ async function start() {
         });
         fs.writeFileSync(keyPath, pems.private);
         fs.writeFileSync(certPath, pems.cert);
+        fs.writeFileSync(ipRecordPath, LAN_IP);
         httpsOptions = {
             key: pems.private,
             cert: pems.cert
@@ -327,27 +396,8 @@ async function start() {
         console.log(`💻 PC Receiver URL:     http://localhost:${HTTP_PORT}`);
         console.log(`🌐 Local Network HTTP:  http://${LAN_IP}:${HTTP_PORT}`);
         console.log(`🔒 Local Network HTTPS: https://${LAN_IP}:${HTTPS_PORT}`);
-        console.log(`📱 Mobile Web Client:   https://${LAN_IP}:${HTTPS_PORT}/mobile`);
-        console.log(`🍎 Apple iOS AirPlay:   Broadcast active on LAN via Bonjour`);
+        console.log(`📱 Mobile Web Client:   http://${LAN_IP}:${HTTP_PORT}/mobile`);
         console.log(`======================================================\n`);
-
-        // Advertise mDNS AirPlay service on LAN for Apple devices
-        try {
-            const bonjour = new Bonjour();
-            bonjour.publish({
-                name: `ScreenCast-Pro-${os.hostname()}`,
-                type: 'airplay',
-                port: 7000,
-                txt: {
-                    model: 'AppleTV3,2',
-                    srcvers: '220.68',
-                    flags: '0x4'
-                }
-            });
-            console.log(`[mDNS/Bonjour] AirPlay service advertised as: ScreenCast-Pro-${os.hostname()}`);
-        } catch (e) {
-            console.warn('[mDNS/Bonjour] Could not publish mDNS broadcast:', e.message);
-        }
     });
 
     httpsServer.listen(HTTPS_PORT, '0.0.0.0', () => {

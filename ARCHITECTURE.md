@@ -1,7 +1,7 @@
 # Kiến Trúc Hệ Thống ScreenCast Pro (Multi Display)
 
 ## 1. Giới thiệu tổng quan
-**ScreenCast Pro** là giải pháp phần mềm chuyên nghiệp cho phép truyền và chiếu trực tiếp màn hình điện thoại (iOS / Android) lên máy tính thông qua cơ chế quét mã QR tiện lợi, độ trễ cực thấp (Sub-50ms) trong mạng nội bộ (LAN / Wi-Fi).
+**ScreenCast Pro** là giải pháp phần mềm cho phép truyền và chiếu hình ảnh/màn hình điện thoại (iOS / Android) lên máy tính trong mạng Wi-Fi nội bộ thông qua mã PIN kết nối 6 chữ số và mã QR tiện lợi.
 
 ---
 
@@ -12,42 +12,44 @@
 |                     PC RECEIVER (Máy tính)                   |
 |                                                             |
 |  [Node.js Core Server]                                      |
-|  ├── HTTP (Port 3000)  <-- Web UI Dashboard (HUD)           |
-|  ├── HTTPS (Port 3443) <-- Self-Signed TLS for Media APIs   |
-|  └── WebSocket Engine  <-- Session & WebRTC Signaling       |
+|  ├── HTTP (Port 3000)  <-- Web UI Dashboard (HUD) & LAN     |
+|  ├── HTTPS (Port 3443) <-- Local TLS for Secure Web APIs    |
+|  └── WebSocket Engine  <-- Session, Signaling & Frame Relay |
 |                                                             |
-|  [Web UI Controller] (Vanilla ES6, Hardware Canvas/Video)   |
+|  [Web UI Controller] (Vanilla ES6, HTML5 Video & Canvas)    |
 |  ├── RTCPeerConnection (MediaStream Video Receiver)         |
-|  ├── Stream Controls: Rotate, Screenshot, WebM Recorder    |
-|  └── Diagnostics: FPS Counter, Ping/Latency HUD             |
+|  ├── Canvas Fallback (Direct WebSocket JPEG Frames)         |
+|  ├── Stream Controls: Rotate, Snapshot, WebM Recorder       |
+|  └── Diagnostics: Real-time Stats via getStats() (FPS, RTT) |
 +------------------------------▲------------------------------+
                                │
-            WebRTC P2P (Local LAN UDP Video Chunks)
+            WebRTC P2P (Local LAN Video Stream)
             WebSocket Signaling (Handshake & ICE Candidates)
+            Direct WebSocket Binary (Fallback / ReplayKit)
                                │
 +------------------------------▼------------------------------+
 |                    MOBILE SENDER (Điện thoại)                |
 |                                                             |
 |  [Tier 1: Web Instant Cast] (iOS Safari & Android Chrome)   |
-|  ├── Native Camera App scans QR Code                        |
-|  ├── Connects to HTTPS URL via Safari / Chrome              |
-|  ├── High-Definition Camera / Document Mirroring (1080p)    |
+|  ├── Nhập mã PIN 6 chữ số hoặc quét mã QR                   |
+|  ├── Kết nối HTTP/WebSocket trong mạng LAN                  |
+|  ├── Camera HD / Soi tài liệu bàn làm việc                  |
 |  └── Live Interactive Touch Canvas Whiteboard Mirror        |
 |                                                             |
 |  [Tier 2: Apple iOS ReplayKit Broadcast] (iPhone / iPad)    |
-|  ├── AVCaptureSession QR Scanner                            |
 |  ├── RPSystemBroadcastPickerView Launcher                   |
 |  ├── RPBroadcastSampleHandler (Background Screen Capture)   |
-|  └── Real-time WebSocket / WebRTC Streaming                 |
+|  └── Truyền khung hình nhị phân qua WebSocket trực tiếp     |
+|  * Ghi chú: AirPlay Mirroring thật cần receiver chuyên dụng  |
+|    như UxPlay / AirServer (xem hướng dẫn đi kèm)             |
 |                                                             |
 |  [Tier 3: Android Native MediaProjection] (Samsung/Xiaomi)  |
-|  ├── CameraX / ZXing QR Scanner                             |
-|  ├── Android MediaProjection System API                     |
-|  ├── Foreground Service with Notification                   |
-|  └── Hardware H.264 / WebRTC Streamer                       |
+|  ├── Foreground Service với Notification (Android 14+)      |
+|  ├── MediaProjection Capture & VirtualDisplay               |
+|  └── WebRTC / Frame Streamer                                |
 |                                                             |
 |  [Tier 4: Scrcpy Wi-Fi Engine]                              |
-|  └── Wireless Debugging ADB Pairing (Sub-15ms latency)      |
+|  └── Wireless Debugging ADB Pairing                         |
 +-------------------------------------------------------------+
 ```
 
@@ -57,18 +59,21 @@
 
 1. **Khởi tạo phiên (Session Generation):**
    - Khi PC mở ứng dụng, máy tính gửi yêu cầu tới `/api/session/new`.
-   - Server phát sinh `Session ID` duy nhất (ví dụ: `CAST-107309`), tự động phát hiện IP LAN (ví dụ: `192.168.1.188`), sinh mã QR chứa đường dẫn HTTPS an toàn.
+   - Server phát sinh `Session ID` dạng `CAST-XXXXXX` cùng mã PIN 6 chữ số và `receiverToken` ngẫu nhiên bảo mật.
+   - Server tự động phát hiện IP LAN vật lý (loại bỏ adapter ảo Hyper-V, WSL, VMware, v.v.).
+   - Tạo mã QR và đường dẫn truy cập cho thiết bị di động.
 
-2. **Quét mã QR (QR Scan & Discovery):**
-   - Người dùng dùng Camera điện thoại quét mã QR.
-   - Trình duyệt di động mở đường dẫn phiên: `https://192.168.1.188:3443/mobile/?session=CAST-107309`.
+2. **Kết nối & Xác thực (Discovery & Authentication):**
+   - Người dùng có thể nhập mã PIN 6 chữ số trên trình duyệt di động hoặc quét mã QR.
+   - Thiết bị di động gửi yêu cầu xác thực qua API `/api/session/verify`.
+   - Cả máy tính (Receiver) và điện thoại (Sender) kết nối tới WebSocket Signaling và đăng ký phòng theo `Session ID`.
 
 3. **Báo hiệu WebRTC (Signaling Exchange):**
-   - Cả máy tính (Receiver) và điện thoại (Sender) đăng ký vào kênh WebSocket chung phòng `CAST-107309`.
    - Thiết bị di động tạo `Offer` SDP, gửi qua WebSocket.
-   - Máy tính nhận `Offer`, tạo `Answer` SDP gửi ngược lại.
-   - Hai bên trao đổi `ICE Candidates` để tìm đường truyền P2P nhanh nhất trong mạng Wi-Fi cục bộ.
+   - Máy tính nhận `Offer`, khởi tạo mới `RTCPeerConnection` và gửi `Answer` SDP.
+   - Trao đổi `ICE Candidates` có hàng đợi (queue) để tránh lỗi ứng viên đến trước `setRemoteDescription`.
 
-4. **Truyền luồng Video (Hardware-accelerated Media Streaming):**
-   - Luồng video được mã hóa phần cứng và truyền trực tiếp qua giao thức UDP WebRTC giữa 2 máy.
-   - Máy tính hiển thị hình ảnh thời gian thực, cung cấp bộ công cụ xoay màn hình, chụp ảnh và quay video lưu vào ổ cứng.
+4. **Hiển thị & Chẩn đoán thực tế (Display & Diagnostics):**
+   - Luồng video được hiển thị trên thẻ `<video>` hoặc `<canvas>` fallback.
+   - HUD đo lường chỉ số thực tế từ `RTCPeerConnection.getStats()` (FPS, RTT thực) thay vì dữ liệu mô phỏng.
+   - Các công cụ bổ trợ: xoay hình 90/180/270°, chụp ảnh màn hình chính xác theo góc quay, ghi video WebM.

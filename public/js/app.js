@@ -1,24 +1,31 @@
 /**
- * ScreenCast Pro - PC Desktop Receiver Controller
- * High-performance WebRTC P2P Receiver with dynamic HUD and streaming tools
+ * ScreenCast Pro - PC Desktop Receiver Controller (Production-grade)
+ * Supports WebRTC P2P (Hardware-accelerated) and WebSocket Direct Frame streaming (iOS ReplayKit)
  */
 
 class ScreenCastReceiver {
     constructor() {
         this.sessionId = null;
+        this.pin = null;
+        this.receiverToken = null;
         this.ws = null;
         this.peerConnection = null;
         this.remoteStream = null;
+        this.iceCandidateQueue = [];
+
         this.mediaRecorder = null;
         this.recordedChunks = [];
         this.isRecording = false;
 
         this.rotationAngle = 0;
         this.isFitCover = false;
-        this.fpsCounter = 0;
-        this.fpsInterval = null;
+        this.activeMode = 'idle'; // 'webrtc', 'canvas', 'idle'
 
-        // RTC Configuration with Google Public STUN
+        this.fpsInterval = null;
+        this.rawFrameCount = 0;
+        this.lastRawFrameTime = performance.now();
+
+        // RTC Configuration with STUN servers
         this.rtcConfig = {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
@@ -47,10 +54,13 @@ class ScreenCastReceiver {
             btnRefreshSession: document.getElementById('btnRefreshSession'),
             manualUrlInput: document.getElementById('manualUrlInput'),
             btnCopyUrl: document.getElementById('btnCopyUrl'),
+            videoWrapper: document.getElementById('videoWrapper'),
             remoteVideo: document.getElementById('remoteVideo'),
+            fallbackCanvas: document.getElementById('fallbackCanvas'),
             statFps: document.getElementById('statFps'),
             statLatency: document.getElementById('statLatency'),
             statResolution: document.getElementById('statResolution'),
+            statProtocol: document.getElementById('statProtocol'),
             btnRotate: document.getElementById('btnRotate'),
             btnSnapshot: document.getElementById('btnSnapshot'),
             btnRecord: document.getElementById('btnRecord'),
@@ -103,13 +113,17 @@ class ScreenCastReceiver {
             if (!data.success) throw new Error(data.error);
 
             this.sessionId = data.sessionId;
+            this.pin = data.pin;
+            this.receiverToken = data.receiverToken;
+
             this.dom.sessionIdDisplay.textContent = this.sessionId;
             if (this.dom.pinDisplayBig) {
-                this.dom.pinDisplayBig.textContent = data.pin || data.sessionId.replace('CAST-', '');
+                this.dom.pinDisplayBig.textContent = this.pin;
             }
             if (this.dom.quickWebLink) {
-                this.dom.quickWebLink.textContent = data.directMobileUrl || (window.location.origin + '/mobile');
+                this.dom.quickWebLink.textContent = data.directMobileUrl || `${window.location.protocol}//${data.lanIp}:${data.httpPort}/mobile`;
             }
+
             this.dom.networkIpDisplay.textContent = `${data.lanIp}:${data.httpPort}`;
             this.dom.manualUrlInput.value = data.mobileUrl;
 
@@ -127,6 +141,8 @@ class ScreenCastReceiver {
 
     connectSignaling() {
         if (this.ws) {
+            // Remove onclose to prevent race conditions during refresh
+            this.ws.onclose = null;
             this.ws.close();
         }
 
@@ -139,13 +155,21 @@ class ScreenCastReceiver {
             this.ws.send(JSON.stringify({
                 type: 'register',
                 role: 'receiver',
-                sessionId: this.sessionId
+                sessionId: this.sessionId,
+                receiverToken: this.receiverToken
             }));
-            this.updateStatus('Sẵn sàng - Đang chờ quét mã...', 'waiting');
+            this.updateStatus('Sẵn sàng - Chờ thiết bị kết nối...', 'waiting');
         };
 
         this.ws.onmessage = async (event) => {
             try {
+                // Check if binary frame received from sender (direct iOS frame chunk)
+                if (event.data instanceof Blob) {
+                    const arrayBuffer = await event.data.arrayBuffer();
+                    this.renderBinaryFrame(arrayBuffer);
+                    return;
+                }
+
                 const message = JSON.parse(event.data);
                 await this.handleSignalingMessage(message);
             } catch (err) {
@@ -166,9 +190,8 @@ class ScreenCastReceiver {
     async handleSignalingMessage(message) {
         switch (message.type) {
             case 'sender_ready':
-                this.showToast('Thiết bị di động đã quét mã thành công!', 'success');
-                this.updateStatus('Đang kết nối luồng video...', 'waiting');
-                this.setupPeerConnection();
+                this.showToast('Thiết bị di động đã kết nối thành công!', 'success');
+                this.updateStatus('Đang thiết lập kênh truyền...', 'waiting');
                 break;
 
             case 'signal':
@@ -185,13 +208,22 @@ class ScreenCastReceiver {
                 this.showToast('Điện thoại đã ngắt kết nối.', 'warning');
                 this.disconnectStream();
                 break;
+
+            case 'error':
+                this.showToast(`Lỗi: ${message.message}`, 'danger');
+                break;
         }
     }
 
     setupPeerConnection() {
         if (this.peerConnection) {
             this.peerConnection.close();
+            this.peerConnection = null;
         }
+
+        this.iceCandidateQueue = [];
+        this.remoteStream = new MediaStream();
+        this.dom.remoteVideo.srcObject = this.remoteStream;
 
         this.peerConnection = new RTCPeerConnection(this.rtcConfig);
 
@@ -207,14 +239,11 @@ class ScreenCastReceiver {
 
         this.peerConnection.ontrack = (event) => {
             console.log('[WebRTC] Remote track received:', event.track.kind);
-            if (!this.remoteStream) {
-                this.remoteStream = new MediaStream();
-                this.dom.remoteVideo.srcObject = this.remoteStream;
-            }
             this.remoteStream.addTrack(event.track);
 
             this.dom.remoteVideo.onloadedmetadata = () => {
-                this.onStreamReady();
+                this.dom.remoteVideo.play().catch(e => console.warn('Autoplay prevented:', e));
+                this.onStreamReady('webrtc');
             };
         };
 
@@ -229,50 +258,88 @@ class ScreenCastReceiver {
     }
 
     async handlePeerSignal(payload) {
-        if (!this.peerConnection) {
-            this.setupPeerConnection();
-        }
-
         if (payload.offer) {
+            // New offer received -> Recreate PeerConnection cleanly
+            this.setupPeerConnection();
+
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
+
+            // Drain queued ICE candidates
+            while (this.iceCandidateQueue.length > 0) {
+                const queuedCandidate = this.iceCandidateQueue.shift();
+                try {
+                    await this.peerConnection.addIceCandidate(new RTCIceCandidate(queuedCandidate));
+                } catch (e) {
+                    console.error('[WebRTC] Queued ICE candidate error:', e);
+                }
+            }
+
             const answer = await this.peerConnection.createAnswer();
             await this.peerConnection.setLocalDescription(answer);
 
-            this.ws.send(JSON.stringify({
-                type: 'signal',
-                sessionId: this.sessionId,
-                payload: { answer }
-            }));
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                this.ws.send(JSON.stringify({
+                    type: 'signal',
+                    sessionId: this.sessionId,
+                    payload: { answer }
+                }));
+            }
         } else if (payload.candidate) {
-            try {
-                await this.peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
-            } catch (err) {
-                console.error('[WebRTC] Error adding ICE candidate:', err);
+            if (!this.peerConnection || !this.peerConnection.remoteDescription) {
+                // Queue candidate if remote description not yet set
+                this.iceCandidateQueue.push(payload.candidate);
+            } else {
+                try {
+                    await this.peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+                } catch (err) {
+                    console.error('[WebRTC] Error adding ICE candidate:', err);
+                }
             }
         }
     }
 
-    onStreamReady() {
+    onStreamReady(mode) {
+        this.activeMode = mode;
         this.dom.pairingScreen.classList.add('hidden');
         this.dom.streamingView.classList.remove('hidden');
 
-        const video = this.dom.remoteVideo;
-        this.dom.statResolution.textContent = `${video.videoWidth}x${video.videoHeight}`;
+        if (mode === 'webrtc') {
+            this.dom.remoteVideo.classList.remove('hidden');
+            this.dom.fallbackCanvas.classList.add('hidden');
+            if (this.dom.statProtocol) {
+                this.dom.statProtocol.textContent = 'WebRTC P2P';
+                this.dom.statProtocol.className = 'val green';
+            }
+        } else if (mode === 'canvas') {
+            this.dom.remoteVideo.classList.add('hidden');
+            this.dom.fallbackCanvas.classList.remove('hidden');
+            if (this.dom.statProtocol) {
+                this.dom.statProtocol.textContent = 'Direct WS Stream';
+                this.dom.statProtocol.className = 'val green';
+            }
+        }
 
-        this.startFpsDiagnostics();
+        this.startRealDiagnostics();
         this.showToast('Bắt đầu chiếu màn hình thành công!', 'success');
     }
 
+    renderBinaryFrame(arrayBuffer) {
+        const blob = new Blob([arrayBuffer], { type: 'image/jpeg' });
+        const url = URL.createObjectURL(blob);
+        this.drawFrameToCanvas(url, () => URL.revokeObjectURL(url));
+    }
+
     renderRawFrame(base64Data) {
-        if (!this.dom.pairingScreen.classList.contains('hidden')) {
-            this.dom.pairingScreen.classList.add('hidden');
-            this.dom.streamingView.classList.remove('hidden');
-            this.dom.remoteVideo.classList.add('hidden');
-            this.dom.fallbackCanvas.classList.remove('hidden');
-            this.startFpsDiagnostics();
-            this.updateStatus('Đang chiếu màn hình iOS ReplayKit', 'connected');
-            this.showToast('Đang phát màn hình iOS trực tiếp!', 'success');
+        this.drawFrameToCanvas('data:image/jpeg;base64,' + base64Data);
+    }
+
+    drawFrameToCanvas(src, onComplete) {
+        if (this.activeMode !== 'canvas') {
+            this.onStreamReady('canvas');
+            this.updateStatus('Đang chiếu màn hình (Direct Frame)', 'connected');
         }
+
+        this.rawFrameCount++;
 
         const img = new Image();
         img.onload = () => {
@@ -282,75 +349,106 @@ class ScreenCastReceiver {
             canvas.height = img.height;
             this.dom.statResolution.textContent = `${img.width}x${img.height}`;
 
-            if (this.rotationAngle !== 0) {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.save();
-                ctx.translate(canvas.width / 2, canvas.height / 2);
-                ctx.rotate((this.rotationAngle * Math.PI) / 180);
-                if (this.rotationAngle % 180 !== 0) {
-                    ctx.drawImage(img, -img.height / 2, -img.width / 2, img.height, img.width);
-                } else {
-                    ctx.drawImage(img, -img.width / 2, -img.height / 2, img.width, img.height);
-                }
-                ctx.restore();
-            } else {
-                ctx.drawImage(img, 0, 0);
-            }
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+
+            if (onComplete) onComplete();
         };
-        img.src = 'data:image/jpeg;base64,' + base64Data;
+        img.src = src;
     }
 
-    startFpsDiagnostics() {
+    startRealDiagnostics() {
         if (this.fpsInterval) clearInterval(this.fpsInterval);
 
-        let lastFrameTime = performance.now();
-        let frameCount = 0;
+        let lastBytesReceived = 0;
+        let lastTimestamp = performance.now();
+        let lastFrameCountSnapshot = 0;
 
-        const checkFps = () => {
-            if (this.dom.remoteVideo.getVideoPlaybackQuality) {
-                const quality = this.dom.remoteVideo.getVideoPlaybackQuality();
-                this.dom.statFps.textContent = quality.totalVideoFrames ? '60 FPS' : '30 FPS';
+        this.fpsInterval = setInterval(async () => {
+            if (this.activeMode === 'webrtc' && this.peerConnection) {
+                try {
+                    const stats = await this.peerConnection.getStats();
+                    let currentFps = null;
+                    let currentRtt = null;
+
+                    stats.forEach(report => {
+                        if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                            if (report.framesPerSecond !== undefined) {
+                                currentFps = Math.round(report.framesPerSecond);
+                            }
+                            if (report.frameWidth && report.frameHeight) {
+                                this.dom.statResolution.textContent = `${report.frameWidth}x${report.frameHeight}`;
+                            }
+                        }
+                        if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                            if (report.currentRoundTripTime !== undefined) {
+                                currentRtt = Math.round(report.currentRoundTripTime * 1000);
+                            }
+                        }
+                    });
+
+                    this.dom.statFps.textContent = (currentFps !== null) ? `${currentFps} FPS` : 'Đang tính...';
+                    this.dom.statLatency.textContent = (currentRtt !== null) ? `${currentRtt} ms` : 'LAN < 20ms';
+                } catch (e) {
+                    // Fallback to video playback quality
+                    if (this.dom.remoteVideo.getVideoPlaybackQuality) {
+                        const q = this.dom.remoteVideo.getVideoPlaybackQuality();
+                        this.dom.statFps.textContent = `${q.totalVideoFrames ? 30 : 0} FPS`;
+                    }
+                }
+            } else if (this.activeMode === 'canvas') {
+                // Calculate actual frames received in last second
+                const now = performance.now();
+                const deltaSec = (now - lastTimestamp) / 1000;
+                const framesDelta = this.rawFrameCount - lastFrameCountSnapshot;
+                const fps = Math.round(framesDelta / (deltaSec || 1));
+
+                lastFrameCountSnapshot = this.rawFrameCount;
+                lastTimestamp = now;
+
+                this.dom.statFps.textContent = `${fps} FPS`;
+                this.dom.statLatency.textContent = 'Trực tiếp (Local)';
             }
-            // Estimate random low latency on local network
-            const ping = Math.floor(12 + Math.random() * 8);
-            this.dom.statLatency.textContent = `~${ping}ms`;
-        };
-
-        this.fpsInterval = setInterval(checkFps, 1000);
+        }, 1000);
     }
 
     rotateVideo() {
         this.rotationAngle = (this.rotationAngle + 90) % 360;
-        this.dom.remoteVideo.style.transform = `rotate(${this.rotationAngle}deg)`;
+        const transform = `rotate(${this.rotationAngle}deg)`;
+        this.dom.remoteVideo.style.transform = transform;
+        this.dom.fallbackCanvas.style.transform = transform;
         this.showToast(`Xoay màn hình: ${this.rotationAngle}°`, 'info');
     }
 
     takeSnapshot() {
-        const video = this.dom.remoteVideo;
-        if (!video.videoWidth) return;
+        const isCanvasMode = (this.activeMode === 'canvas');
+        const source = isCanvasMode ? this.dom.fallbackCanvas : this.dom.remoteVideo;
+        const sourceWidth = isCanvasMode ? source.width : source.videoWidth;
+        const sourceHeight = isCanvasMode ? source.height : source.videoHeight;
+
+        if (!sourceWidth || !sourceHeight) {
+            this.showToast('Chưa có hình ảnh để chụp màn hình', 'warning');
+            return;
+        }
 
         const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        const isSideways = (this.rotationAngle % 180 !== 0);
+
+        // Correctly swap width and height when rotated 90 or 270 degrees
+        canvas.width = isSideways ? sourceHeight : sourceWidth;
+        canvas.height = isSideways ? sourceWidth : sourceHeight;
         const ctx = canvas.getContext('2d');
 
-        // Apply rotation if needed
         if (this.rotationAngle !== 0) {
             ctx.translate(canvas.width / 2, canvas.height / 2);
             ctx.rotate((this.rotationAngle * Math.PI) / 180);
-            if (this.rotationAngle % 180 !== 0) {
-                // swap width/height if 90 or 270
-                ctx.drawImage(video, -video.videoHeight / 2, -video.videoWidth / 2);
-            } else {
-                ctx.drawImage(video, -video.videoWidth / 2, -video.videoHeight / 2);
-            }
+            ctx.drawImage(source, -sourceWidth / 2, -sourceHeight / 2, sourceWidth, sourceHeight);
         } else {
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
         }
 
-        const dataUrl = canvas.toDataURL('image/png');
         const a = document.createElement('a');
-        a.href = dataUrl;
+        a.href = canvas.toDataURL('image/png');
         a.download = `screencast-${Date.now()}.png`;
         a.click();
 
@@ -358,17 +456,32 @@ class ScreenCastReceiver {
     }
 
     toggleRecording() {
-        if (!this.remoteStream) return;
+        if (this.activeMode === 'idle') return;
 
         if (!this.isRecording) {
-            // Start recording
             this.recordedChunks = [];
-            const options = { mimeType: 'video/webm;codecs=vp9,opus' };
-            
+            let streamToRecord = null;
+
+            if (this.activeMode === 'canvas') {
+                streamToRecord = this.dom.fallbackCanvas.captureStream(30);
+            } else if (this.remoteStream) {
+                streamToRecord = this.remoteStream;
+            }
+
+            if (!streamToRecord) {
+                this.showToast('Không thể lấy luồng video để ghi hình', 'warning');
+                return;
+            }
+
             try {
-                this.mediaRecorder = new MediaRecorder(this.remoteStream, options);
+                this.mediaRecorder = new MediaRecorder(streamToRecord, { mimeType: 'video/webm;codecs=vp8' });
             } catch (e) {
-                this.mediaRecorder = new MediaRecorder(this.remoteStream);
+                try {
+                    this.mediaRecorder = new MediaRecorder(streamToRecord);
+                } catch (err) {
+                    this.showToast('Trình duyệt không hỗ trợ ghi định dạng này', 'danger');
+                    return;
+                }
             }
 
             this.mediaRecorder.ondataavailable = (event) => {
@@ -394,8 +507,9 @@ class ScreenCastReceiver {
             this.dom.recordLabel.textContent = 'Dừng ghi';
             this.showToast('Bắt đầu ghi video màn hình...', 'info');
         } else {
-            // Stop recording
-            this.mediaRecorder.stop();
+            if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+                this.mediaRecorder.stop();
+            }
             this.isRecording = false;
             this.dom.btnRecord.classList.remove('recording');
             this.dom.recordLabel.textContent = 'Ghi hình';
@@ -411,7 +525,9 @@ class ScreenCastReceiver {
 
     toggleFitMode() {
         this.isFitCover = !this.isFitCover;
-        this.dom.remoteVideo.style.objectFit = this.isFitCover ? 'cover' : 'contain';
+        const fitStyle = this.isFitCover ? 'cover' : 'contain';
+        this.dom.remoteVideo.style.objectFit = fitStyle;
+        this.dom.fallbackCanvas.style.objectFit = fitStyle;
         this.showToast(this.isFitCover ? 'Chế độ: Đầy màn hình (Fill)' : 'Chế độ: Giữ tỉ lệ (Fit)', 'info');
     }
 
@@ -436,8 +552,12 @@ class ScreenCastReceiver {
             this.remoteStream.getTracks().forEach(track => track.stop());
             this.remoteStream = null;
         }
-        if (this.fpsInterval) clearInterval(this.fpsInterval);
+        if (this.fpsInterval) {
+            clearInterval(this.fpsInterval);
+            this.fpsInterval = null;
+        }
 
+        this.activeMode = 'idle';
         this.dom.streamingView.classList.add('hidden');
         this.dom.pairingScreen.classList.remove('hidden');
         this.dom.remoteVideo.classList.remove('hidden');

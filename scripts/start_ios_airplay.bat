@@ -1,23 +1,27 @@
 @echo off
-title ScreenCast Pro - Apple AirPlay Windows Receiver
-color 0f
+title ScreenCast Pro - Huong Dan AirPlay Receiver cho Windows
+color 0b
 echo ====================================================================
-echo      ScreenCast Pro - Huong dan phan chieu AirPlay tu iPhone/iPad
+echo      ScreenCast Pro - Giai phap AirPlay Receiver cho Windows
 echo ====================================================================
 echo.
-echo [1] Kiem tra ket noi:
-echo     - May tinh va iPhone/iPad phai ket noi chung 1 mang Wi-Fi.
-echo     - May tinh da kich hoat quang ba mDNS Bonjour: ScreenCast-Pro-%COMPUTERNAME%
+echo Giai thich ky thuat:
+echo Apple AirPlay Mirroring tren iPhone/iPad su dung ma hoa FairPlay DRM
+echo va giao thuc RAOP dac thu. De may tinh Windows tro thanh mot AirPlay
+echo Receiver dich thuc co the nhan luong man hinh tu iPhone:
 echo.
-echo [2] Cac buoc ket noi tu iPhone/iPad:
-echo     Buoc 1: Mo iPhone, vuot tu goc tren ben phai xuong de vao Trung tam dieu khien.
-echo     Buoc 2: Nhan vao bieu tuong 2 hinh chu nhat long nhau (Phan chieu man hinh).
-echo     Buoc 3: Chon "ScreenCast-Pro" hoac ten may tinh cua ban.
+echo [Giai phap 1 - Ma nguon mo mien phi]: UxPlay / OpenMirrorPhone
+echo     - Tai ban build Windows cua UxPlay: https://github.com/FDH2/UxPlay/releases
+echo     - Hoac OpenMirrorPhone: https://github.com/ImElio/openmirrorphone
+echo     - Yeu cau: PC va iPhone cung mang Wi-Fi, Bonjour Service da cai dat.
 echo.
-echo [3] Neu dung cong cu ma nguon mo chuyen dung (OpenMirrorPhone / UxPlay):
-echo     Ban co the su dung them UxPlay hoac OpenMirrorPhone (GitHub) de nhan luong
-echo     AirPlay 2 duoc ma hoa truc tiep ve man hinh may tinh.
+echo [Giai phap 2 - Thuong mai on dinh]: AirServer / Reflector 4
+echo     - AirServer bien Windows thanh thiet bị nhan AirPlay chuyen nghiep.
 echo.
-echo Nhan phim bat ky de mo huong dan truc quan tren trinh duyet...
+echo [Giai phap 3 - Khong can AirPlay]: Dung App iOS Native ReplayKit
+echo     - Mo thu muc 'ios-native/' trong project nay bang Xcode va cai dat.
+echo     - Nhap ma PIN 6 chu so hien thi tren PC de chieu truc tiep qua mang LAN.
+echo.
+echo Nhan phim bat ky de mo giao dien PC Receiver tren trinh duyet...
 pause >nul
 start http://localhost:3000

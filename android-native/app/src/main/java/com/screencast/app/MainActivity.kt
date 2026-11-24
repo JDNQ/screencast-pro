@@ -1,8 +1,10 @@
 package com.screencast.app
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
@@ -11,11 +13,12 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.google.zxing.integration.android.IntentIntegrator
 
 /**
  * ScreenCast Pro - Android Sender Main Activity
- * Handles QR Code scanning & MediaProjection OS permission request
+ * Handles runtime permissions, QR Code scanning & MediaProjection OS permission request
  */
 class MainActivity : AppCompatActivity() {
 
@@ -26,6 +29,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var btnScanQR: Button
     private lateinit var btnStopCast: Button
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val cameraGranted = permissions[Manifest.permission.CAMERA] ?: false
+        if (cameraGranted) {
+            startQRScan()
+        } else {
+            Toast.makeText(this, "Cần cấp quyền Camera để quét mã QR", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     private val screenCaptureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -48,7 +62,7 @@ class MainActivity : AppCompatActivity() {
         mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
         btnScanQR.setOnClickListener {
-            initiateQRScanner()
+            checkPermissionsAndScan()
         }
 
         btnStopCast.setOnClickListener {
@@ -56,7 +70,26 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun initiateQRScanner() {
+    private fun checkPermissionsAndScan() {
+        val permissionsToRequest = mutableListOf(Manifest.permission.CAMERA)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
+        val allGranted = permissionsToRequest.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+
+        if (allGranted) {
+            startQRScan()
+        } else {
+            permissionLauncher.launch(permissionsToRequest.toTypedArray())
+        }
+    }
+
+    private fun startQRScan() {
         val integrator = IntentIntegrator(this)
         integrator.setPrompt("Hướng camera về phía mã QR trên màn hình máy tính")
         integrator.setBeepEnabled(true)
@@ -78,11 +111,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleScannedQRCode(scannedUrl: String) {
-        // Example URL: https://192.168.1.188:3443/mobile/?session=CAST-849201
         try {
             val uri = android.net.Uri.parse(scannedUrl)
             sessionId = uri.getQueryParameter("session") ?: ""
-            serverUrl = "${uri.scheme}://${uri.host}:${uri.port}"
+            val port = if (uri.port != -1) uri.port else 3000
+            serverUrl = "http://${uri.host}:$port"
 
             tvStatus.text = "Đã quét thành công!\nPhiên: $sessionId\nMáy tính: $serverUrl"
             requestScreenCapture()

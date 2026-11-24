@@ -581,11 +581,23 @@ body {
     justify-content: center;
 }
 
-#remoteVideo {
+#remoteVideo, #fallbackCanvas {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
     transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.guide-pane {
+    display: none;
+}
+
+.guide-pane.active {
+    display: block;
+}
+
+.guide-pane.hidden {
+    display: none !important;
 }
 
 /* Stats HUD */

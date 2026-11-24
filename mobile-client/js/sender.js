@@ -138,9 +138,28 @@ class ScreenCastSender {
     }
 
     connectSignaling() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}`;
-        this.ws = new WebSocket(wsUrl);
+        if (this.ws) {
+            this.ws.close();
+            this.ws = null;
+        }
+
+        // On mobile LAN, prefer plain ws: to port 3000 to prevent iOS Safari dropping wss on self-signed certs
+        let wsUrl;
+        if (window.location.protocol === 'https:' && window.location.port === '3443') {
+            wsUrl = `ws://${window.location.hostname}:3000`;
+        } else {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            wsUrl = `${protocol}//${window.location.host}`;
+        }
+
+        this.setConnectionState(false, 'Đang nối máy chủ...');
+
+        try {
+            this.ws = new WebSocket(wsUrl);
+        } catch (e) {
+            // Fallback
+            this.ws = new WebSocket(`ws://${window.location.hostname}:3000`);
+        }
 
         this.ws.onopen = () => {
             console.log('[Sender] Connected to signaling server');
@@ -149,7 +168,7 @@ class ScreenCastSender {
                 role: 'sender',
                 sessionId: this.sessionId
             }));
-            this.setConnectionState(true, 'Đã ghép nối PC');
+            this.setConnectionState(false, 'Chờ PC kết nối...');
         };
 
         this.ws.onmessage = async (event) => {
@@ -163,13 +182,18 @@ class ScreenCastSender {
 
         this.ws.onclose = () => {
             console.warn('[Sender] Disconnected from signaling server');
-            this.setConnectionState(false, 'Mất kết nối PC');
+            this.setConnectionState(false, 'Mất kết nối');
         };
     }
 
     async handleSignalingMessage(message) {
         switch (message.type) {
+            case 'registered':
+                this.setConnectionState(false, 'Đã vào phòng - Chờ PC...');
+                break;
+
             case 'receiver_ready':
+                this.setConnectionState(true, 'Đã ghép nối PC');
                 this.showToast('Máy tính đã sẵn sàng nhận hình ảnh!');
                 if (this.localStream && !this.peerConnection) {
                     this.initiatePeerCall();
@@ -189,6 +213,7 @@ class ScreenCastSender {
                 break;
 
             case 'receiver_disconnected':
+                this.setConnectionState(false, 'PC đã ngắt kết nối');
                 this.showToast('Máy tính đã đóng kết nối');
                 this.stopStream();
                 break;
@@ -196,6 +221,12 @@ class ScreenCastSender {
     }
 
     async startScreenShare() {
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        if (isIOS) {
+            alert('🍎 LƯU Ý DÀNH CHO APPLE iOS:\n\nSafari trên iOS bị Apple chặn hoàn toàn API chia sẻ màn hình trong web.\n\nĐể chiếu màn hình thật trên iPhone:\n1. Vuốt mở Trung tâm điều khiển (Control Center)\n2. Chạm vào "Phản chiếu màn hình"\n3. Hoặc mở App iOS Native (ReplayKit)\n\nNếu muốn soi tài liệu hoặc bảng vẽ, hãy chọn mục Camera hoặc Bảng vẽ bên dưới.');
+            return;
+        }
+
         try {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
                 throw new Error('OS_NOT_SUPPORTED');
@@ -213,7 +244,7 @@ class ScreenCastSender {
             this.handleStreamObtained(stream);
         } catch (err) {
             console.warn('Screen share not supported or declined:', err);
-            alert('⚠️ THÔNG BÁO TỪ HỆ THỐNG:\n\nTrình duyệt điện thoại (Safari trên iPhone hoặc Chrome trên Android) bị hệ điều hành chặn quay toàn màn hình để bảo vệ quyền riêng tư.\n\nĐể chiếu màn hình thật:\n1. Với iPhone: Dùng tính năng "Phản chiếu màn hình" (AirPlay) trong Trung tâm điều khiển.\n2. Với Android: Dùng tính năng "Smart View / Phát màn hình" trong Cài đặt nhanh, hoặc cài App Android Native (MediaProjection).\n\nNếu bạn muốn dùng Camera để soi tài liệu/vật thể, vui lòng chọn mục "Chiếu Camera HD & Tài Liệu".');
+            alert('Trình duyệt không hỗ trợ hoặc bạn đã huỷ quyền chia sẻ màn hình.');
         }
     }
 

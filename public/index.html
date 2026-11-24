@@ -178,15 +178,15 @@
         <section id="streamingView" class="streaming-view hidden">
             <!-- Video Display Container -->
             <div id="videoWrapper" class="video-wrapper">
-                <video id="remoteVideo" autoplay playsinline></video>
+                <video id="remoteVideo" autoplay playsinline muted></video>
                 <canvas id="fallbackCanvas" class="hidden"></canvas>
 
                 <!-- Stream Diagnostics Overlay -->
                 <div id="statsOverlay" class="stats-overlay">
-                    <div class="stat-item"><span class="label">FPS:</span> <span id="statFps" class="val">60</span></div>
-                    <div class="stat-item"><span class="label">Độ trễ:</span> <span id="statLatency" class="val">~18ms</span></div>
-                    <div class="stat-item"><span class="label">Độ phân giải:</span> <span id="statResolution" class="val">1080x2400</span></div>
-                    <div class="stat-item"><span class="label">Giao thức:</span> <span class="val green">WebRTC P2P</span></div>
+                    <div class="stat-item"><span class="label">FPS:</span> <span id="statFps" class="val">--</span></div>
+                    <div class="stat-item"><span class="label">Độ trễ:</span> <span id="statLatency" class="val">--</span></div>
+                    <div class="stat-item"><span class="label">Độ phân giải:</span> <span id="statResolution" class="val">--</span></div>
+                    <div class="stat-item"><span class="label">Giao thức:</span> <span id="statProtocol" class="val green">Chờ phát</span></div>
                 </div>
 
                 <!-- Floating Toolbar -->

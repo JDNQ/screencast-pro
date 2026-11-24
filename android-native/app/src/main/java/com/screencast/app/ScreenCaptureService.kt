@@ -6,19 +6,27 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import okhttp3.*
+import okio.ByteString.Companion.toByteString
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 
 /**
  * ScreenCaptureService
- * Android Foreground Service managing MediaProjection VirtualDisplay and WebRTC/WebSocket streaming
+ * Android Foreground Service managing MediaProjection VirtualDisplay and direct WebSocket frame streaming
  */
 class ScreenCaptureService : Service() {
 
@@ -33,8 +41,23 @@ class ScreenCaptureService : Service() {
 
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
+    private var imageReader: ImageReader? = null
+    private var imageHandlerThread: HandlerThread? = null
+    private var imageHandler: Handler? = null
+
     private var webSocket: WebSocket? = null
     private val client = OkHttpClient()
+    private var isStreaming = false
+    private var lastFrameTime = 0L
+    private val frameIntervalMs = 33L // ~30 FPS throttle to maintain smooth CPU & network
+
+    private val projectionCallback = object : MediaProjection.Callback() {
+        override fun onStop() {
+            super.onStop()
+            stopStreaming()
+            stopSelf()
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -52,26 +75,45 @@ class ScreenCaptureService : Service() {
         val sessionId = intent.getStringExtra(EXTRA_SESSION_ID) ?: ""
 
         val notification = buildForegroundNotification()
-        startForeground(NOTIFICATION_ID, notification)
+
+        // Android 14 (API 34) requires FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
 
         if (data != null) {
             val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             mediaProjection = projectionManager.getMediaProjection(resultCode, data)
-            
+
+            // Register mandatory callback on Android 14+
+            mediaProjection?.registerCallback(projectionCallback, null)
+
             initSignalingAndStream(serverUrl, sessionId)
         }
 
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun initSignalingAndStream(serverUrl: String, sessionId: String) {
-        // Convert HTTP to WS or HTTPS to WSS
-        val wsUrl = serverUrl.replace("http://", "ws://").replace("https://", "wss://")
+        // Force plain ws:// on local network to avoid self-signed TLS certificate rejection
+        val wsUrl = if (serverUrl.startsWith("https://")) {
+            serverUrl.replace("https://", "ws://").replace(":3443", ":3000")
+        } else if (serverUrl.startsWith("http://")) {
+            serverUrl.replace("http://", "ws://")
+        } else {
+            "ws://$serverUrl"
+        }
+
         val request = Request.Builder().url(wsUrl).build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
-                // Register as sender
                 val registerMsg = JSONObject().apply {
                     put("type", "register")
                     put("role", "sender")
@@ -81,32 +123,91 @@ class ScreenCaptureService : Service() {
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
-                val json = JSONObject(text)
-                when (json.optString("type")) {
-                    "receiver_ready" -> {
-                        startMediaProjectionStream()
+                try {
+                    val json = JSONObject(text)
+                    when (json.optString("type")) {
+                        "receiver_ready" -> {
+                            startScreenStream()
+                        }
                     }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
             }
         })
     }
 
-    private fun startMediaProjectionStream() {
+    private fun startScreenStream() {
+        if (isStreaming) return
+        isStreaming = true
+
         val metrics = resources.displayMetrics
-        val width = 1080
-        val height = 1920
+        val width = 720
+        val height = 1280
         val density = metrics.densityDpi
 
-        // Virtual display capturing device screen
-        // In full WebRTC integration, surface is provided by WebRTC VideoCapturer (SurfaceTextureHelper)
-        /*
+        imageHandlerThread = HandlerThread("ImageReaderThread").apply { start() }
+        imageHandler = Handler(imageHandlerThread!!.looper)
+
+        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+        imageReader?.setOnImageAvailableListener({ reader ->
+            val now = System.currentTimeMillis()
+            if (now - lastFrameTime < frameIntervalMs) {
+                val drop = reader.acquireLatestImage()
+                drop?.close()
+                return@setOnImageAvailableListener
+            }
+            lastFrameTime = now
+
+            val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+            try {
+                val planes = image.planes
+                val buffer = planes[0].buffer
+                val pixelStride = planes[0].pixelStride
+                val rowStride = planes[0].rowStride
+                val rowPadding = rowStride - pixelStride * width
+
+                val bitmap = Bitmap.createBitmap(
+                    width + rowPadding / pixelStride,
+                    height,
+                    Bitmap.Config.ARGB_8888
+                )
+                bitmap.copyPixelsFromBuffer(buffer)
+
+                // Compress bitmap to JPEG stream
+                val stream = ByteArrayOutputStream()
+                val cropped = if (rowPadding == 0) bitmap else Bitmap.createBitmap(bitmap, 0, 0, width, height)
+                cropped.compress(Bitmap.CompressFormat.JPEG, 70, stream)
+                val byteArray = stream.toByteArray()
+
+                // Send binary frame over WebSocket directly
+                webSocket?.send(byteArray.toByteString())
+
+                if (cropped != bitmap) cropped.recycle()
+                bitmap.recycle()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                image.close()
+            }
+        }, imageHandler)
+
         virtualDisplay = mediaProjection?.createVirtualDisplay(
             "ScreenCastProDisplay",
             width, height, density,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            surface, null, null
+            imageReader?.surface, null, null
         )
-        */
+    }
+
+    private fun stopStreaming() {
+        isStreaming = false
+        virtualDisplay?.release()
+        virtualDisplay = null
+        imageReader?.close()
+        imageReader = null
+        imageHandlerThread?.quitSafely()
+        imageHandlerThread = null
     }
 
     private fun buildForegroundNotification(): Notification {
@@ -132,7 +233,8 @@ class ScreenCaptureService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        virtualDisplay?.release()
+        stopStreaming()
+        mediaProjection?.unregisterCallback(projectionCallback)
         mediaProjection?.stop()
         webSocket?.close(1000, "Service stopped")
         stopForeground(true)

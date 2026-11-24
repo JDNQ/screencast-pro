@@ -10,8 +10,16 @@
     <string>1.0.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>ScreenCast Pro cần kết nối mạng cục bộ để truyền màn hình lên máy tính của bạn.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_screencast._tcp</string>
+    </array>
     <key>NSAppTransportSecurity</key>
     <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>

@@ -1,5 +1,6 @@
 import UIKit
 import ReplayKit
+import AudioToolbox
 
 /**
  * ScreenCast Pro - iOS Host Application Controller
@@ -65,7 +66,7 @@ class ViewController: UIViewController {
 
     private let connectButton: UIButton = {
         let btn = UIButton(type: .system)
-        btn.setTitle("⚡ Kết Nối Với Máy Tính", for: .normal)
+        btn.setTitle("⚡ Ghép Nối Với Máy Tính", for: .normal)
         btn.setTitleColor(UIColor(red: 0.06, green: 0.09, blue: 0.16, alpha: 1.0), for: .normal)
         btn.backgroundColor = UIColor(red: 0.22, green: 0.74, blue: 0.97, alpha: 1.0)
         btn.layer.cornerRadius = 12
@@ -85,6 +86,17 @@ class ViewController: UIViewController {
         return label
     }()
 
+    private let broadcastContainerView: UIView = {
+        let view = UIView()
+        view.backgroundColor = UIColor(red: 0.12, green: 0.16, blue: 0.24, alpha: 1.0)
+        view.layer.cornerRadius = 12
+        view.layer.borderWidth = 1
+        view.layer.borderColor = UIColor(red: 0.22, green: 0.74, blue: 0.97, alpha: 0.3).cgColor
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.alpha = 0.5 // Disabled until paired
+        return view
+    }()
+
     private var broadcastPicker: RPSystemBroadcastPickerView?
 
     override func viewDidLoad() {
@@ -101,52 +113,53 @@ class ViewController: UIViewController {
         view.addSubview(ipTextField)
         view.addSubview(pinTextField)
         view.addSubview(connectButton)
+        view.addSubview(broadcastContainerView)
         view.addSubview(statusLabel)
 
+        // Configure ReplayKit Broadcast Picker button inside container
+        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 200, height: 50))
+        picker.preferredExtension = "com.screencast.app.ScreenCastExtension"
+        picker.showsMicrophoneButton = false
+        picker.translatesAutoresizingMaskIntoConstraints = false
+        broadcastContainerView.addSubview(picker)
+        self.broadcastPicker = picker
+
         NSLayoutConstraint.activate([
-            titleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 40),
+            titleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 36),
             titleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
 
             subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
             subtitleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
 
-            ipTextField.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 36),
+            ipTextField.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 32),
             ipTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             ipTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             ipTextField.heightAnchor.constraint(equalToConstant: 48),
 
-            pinTextField.topAnchor.constraint(equalTo: ipTextField.bottomAnchor, constant: 16),
+            pinTextField.topAnchor.constraint(equalTo: ipTextField.bottomAnchor, constant: 14),
             pinTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             pinTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            pinTextField.heightAnchor.constraint(equalToConstant: 56),
+            pinTextField.heightAnchor.constraint(equalToConstant: 54),
 
-            connectButton.topAnchor.constraint(equalTo: pinTextField.bottomAnchor, constant: 20),
+            connectButton.topAnchor.constraint(equalTo: pinTextField.bottomAnchor, constant: 18),
             connectButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             connectButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            connectButton.heightAnchor.constraint(equalToConstant: 52),
+            connectButton.heightAnchor.constraint(equalToConstant: 50),
 
-            statusLabel.topAnchor.constraint(equalTo: connectButton.bottomAnchor, constant: 24),
+            broadcastContainerView.topAnchor.constraint(equalTo: connectButton.bottomAnchor, constant: 18),
+            broadcastContainerView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            broadcastContainerView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            broadcastContainerView.heightAnchor.constraint(equalToConstant: 54),
+
+            picker.centerXAnchor.constraint(equalTo: broadcastContainerView.centerXAnchor),
+            picker.centerYAnchor.constraint(equalTo: broadcastContainerView.centerYAnchor),
+
+            statusLabel.topAnchor.constraint(equalTo: broadcastContainerView.bottomAnchor, constant: 20),
             statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20)
         ])
 
         connectButton.addTarget(self, action: #selector(handleConnect), for: .touchUpInside)
-
-        // Configure ReplayKit Broadcast Picker
-        let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 60, height: 60))
-        picker.preferredExtension = "com.screencast.app.ScreenCastExtension"
-        picker.showsMicrophoneButton = false
-        picker.translatesAutoresizingMaskIntoConstraints = false
-        picker.isHidden = true
-        view.addSubview(picker)
-        self.broadcastPicker = picker
-
-        NSLayoutConstraint.activate([
-            picker.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 20),
-            picker.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            picker.widthAnchor.constraint(equalToConstant: 60),
-            picker.heightAnchor.constraint(equalToConstant: 60)
-        ])
     }
 
     private func loadSavedSettings() {
@@ -178,7 +191,7 @@ class ViewController: UIViewController {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if let error = error {
-                    self.statusLabel.text = "❌ Không thể kết nối tới PC (\(error.localizedDescription))\nHãy đảm bảo cùng mạng Wi-Fi."
+                    self.statusLabel.text = "❌ Không thể kết nối tới PC (\(error.localizedDescription))\nHãy kiểm tra xem PC và iPhone đã cùng mạng Wi-Fi chưa."
                     return
                 }
 
@@ -193,8 +206,9 @@ class ViewController: UIViewController {
                 UserDefaults.standard.set(ip, forKey: "saved_ip")
                 UserDefaults.standard.set(pin, forKey: "saved_pin")
 
-                self.statusLabel.text = "✅ ĐÃ GHÉP NỐI VỚI MÁY TÍNH THÀNH CÔNG!\nChạm biểu tượng bên dưới để Bắt Đầu Chiếu Toàn Màn Hình"
-                self.broadcastPicker?.isHidden = false
+                AudioServicesPlaySystemSound(SystemSoundID(kSystemSoundID_Vibrate))
+                self.statusLabel.text = "✅ ĐÃ GHÉP NỐI THÀNH CÔNG!\nChạm nút Phát sóng bên trên để bắt đầu chiếu toàn màn hình."
+                self.broadcastContainerView.alpha = 1.0
             }
         }.resume()
     }

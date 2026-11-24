@@ -1,10 +1,11 @@
 import ReplayKit
 import CoreMedia
 import VideoToolbox
+import ImageIO
 
 /**
  * ScreenCastExtension - ReplayKit Broadcast Upload Extension
- * Captures live screen video frames (CMSampleBuffer) and streams them over LAN to the PC receiver
+ * Optimized for low memory (< 50MB limit), frame rate throttling, and direct binary streaming
  */
 class SampleHandler: RPBroadcastSampleHandler, URLSessionWebSocketDelegate {
 
@@ -13,14 +14,22 @@ class SampleHandler: RPBroadcastSampleHandler, URLSessionWebSocketDelegate {
     private var sessionId = ""
     private var serverUrl = ""
 
+    // Reusable shared CIContext to prevent memory leak and extension crash
+    private static let sharedCIContext = CIContext(options: [
+        .useSoftwareRenderer: false,
+        .workingColorSpace: NSNull()
+    ])
+
+    private var lastFrameTimestamp: Double = 0
+    private let targetFrameInterval: Double = 1.0 / 30.0 // Throttle to 30 FPS to respect 50MB iOS extension memory limit
+
     override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
-        // Read connection parameters from Shared App Group UserDefaults
         let sharedDefaults = UserDefaults(suiteName: "group.com.screencast.app")
         self.sessionId = sharedDefaults?.string(forKey: "session_id") ?? ""
         self.serverUrl = sharedDefaults?.string(forKey: "server_url") ?? ""
 
         guard !serverUrl.isEmpty, !sessionId.isEmpty else {
-            finishBroadcastWithError(NSError(domain: "ScreenCast", code: -1, userInfo: [NSLocalizedDescriptionKey: "Chưa quét mã QR kết nối"]))
+            finishBroadcastWithError(NSError(domain: "ScreenCast", code: -1, userInfo: [NSLocalizedDescriptionKey: "Chưa nhập mã kết nối trên App ScreenCast Pro"]))
             return
         }
 
@@ -28,15 +37,21 @@ class SampleHandler: RPBroadcastSampleHandler, URLSessionWebSocketDelegate {
     }
 
     private func connectWebSocket() {
-        let wsUrlString = serverUrl.replacingOccurrences(of: "http://", with: "ws://")
-                                   .replacingOccurrences(of: "https://", with: "wss://")
+        // Use plain ws:// to port 3000 to avoid untrusted self-signed certificate rejection on iOS
+        var wsUrlString = serverUrl
+        if wsUrlString.hasPrefix("https://") {
+            wsUrlString = wsUrlString.replacingOccurrences(of: "https://", with: "ws://")
+                                     .replacingOccurrences(of: ":3443", with: ":3000")
+        } else if wsUrlString.hasPrefix("http://") {
+            wsUrlString = wsUrlString.replacingOccurrences(of: "http://", with: "ws://")
+        }
+
         guard let url = URL(string: wsUrlString) else { return }
 
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: OperationQueue())
         webSocketTask = session.webSocketTask(with: url)
         webSocketTask?.resume()
 
-        // Send register message as sender
         let registerPayload: [String: Any] = [
             "type": "register",
             "role": "sender",
@@ -45,9 +60,9 @@ class SampleHandler: RPBroadcastSampleHandler, URLSessionWebSocketDelegate {
 
         if let data = try? JSONSerialization.data(withJSONObject: registerPayload),
            let str = String(data: data, encoding: .utf8) {
-            webSocketTask?.send(.string(str)) { error in
+            webSocketTask?.send(.string(str)) { [weak self] error in
                 if error == nil {
-                    self.isConnected = true
+                    self?.isConnected = true
                 }
             }
         }
@@ -58,45 +73,59 @@ class SampleHandler: RPBroadcastSampleHandler, URLSessionWebSocketDelegate {
 
         switch sampleBufferType {
         case .video:
-            // Extract PixelBuffer from CMSampleBuffer
+            let currentTime = CACurrentMediaTime()
+            if currentTime - lastFrameTimestamp < targetFrameInterval {
+                return // Throttle frame rate
+            }
+            lastFrameTimestamp = currentTime
+
             guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
             
-            // Encode frame to JPEG / H.264 chunk and stream over WebSocket
-            // In high-performance pipeline, use VTCompressionSession for H.264 NAL units
-            sendCompressedFrame(pixelBuffer)
-            
+            // Check orientation from sample buffer attachments
+            var orientation: CGImagePropertyOrientation = .up
+            if let orientationAttachment = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString, attachmentModeOut: nil) as? NSNumber {
+                if let parsedOrientation = CGImagePropertyOrientation(rawValue: orientationAttachment.uint32Value) {
+                    orientation = parsedOrientation
+                }
+            }
+
+            autoreleasepool {
+                sendCompressedBinaryFrame(pixelBuffer, orientation: orientation)
+            }
+
         case .audioApp, .audioMic:
-            // Optional: Handle system audio / microphone sample buffers
             break
-            
+
         @unknown default:
             break
         }
     }
 
-    private func sendCompressedFrame(_ pixelBuffer: CVPixelBuffer) {
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext(options: nil)
+    private func sendCompressedBinaryFrame(_ pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation) {
+        var ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        if orientation != .up {
+            ciImage = ciImage.oriented(orientation)
+        }
+
+        // Downscale image if 4K/2K to preserve strict 50MB extension memory budget
+        let extent = ciImage.extent
+        let maxDimension: CGFloat = 1280.0
+        if extent.width > maxDimension || extent.height > maxDimension {
+            let scale = maxDimension / max(extent.width, extent.height)
+            ciImage = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        }
 
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-              let jpegData = context.jpegRepresentation(of: ciImage, colorSpace: colorSpace, options: [kCGImageDestinationLossyFactor as CIImageRepresentationOption: 0.7]) else {
+              let jpegData = SampleHandler.sharedCIContext.jpegRepresentation(
+                  of: ciImage,
+                  colorSpace: colorSpace,
+                  options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.65]
+              ) else {
             return
         }
 
-        // Send binary JPEG chunk or base64 stream
-        let base64String = jpegData.base64EncodedString()
-        let frameMsg: [String: Any] = [
-            "type": "stream_control",
-            "payload": [
-                "action": "video_frame",
-                "data": base64String
-            ]
-        ]
-
-        if let msgData = try? JSONSerialization.data(withJSONObject: frameMsg),
-           let msgStr = String(data: msgData, encoding: .utf8) {
-            webSocketTask?.send(.string(msgStr)) { _ in }
-        }
+        // Send raw binary frame directly over WebSocket (zero base64 overhead)
+        webSocketTask?.send(.data(jpegData)) { _ in }
     }
 
     override func broadcastFinished() {
