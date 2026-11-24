@@ -8,6 +8,11 @@
     <string>ScreenCastExtension</string>
     <key>CFBundlePackageType</key>
     <string>XPC!</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionPointIdentifier</key>

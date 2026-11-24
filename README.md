@@ -57,7 +57,7 @@ http://localhost:3000
   4. Chọn nguồn phát: Camera HD hoặc Bảng vẽ tương tác.
   *(Lưu ý: Do chính sách bảo mật của Apple, trình duyệt web Safari bị chặn quay màn hình ngoài).*
 * **Cách 2 (Chiếu toàn bộ màn hình qua AirPlay):**
-  - Để Windows nhận được AirPlay từ iPhone, máy tính cần cài một phần mềm AirPlay Receiver thật (như UxPlay mã nguồn mở hoặc AirServer). Xem hướng dẫn tại file `scripts/start_ios_airplay.bat`.
+  - Để Windows nhận được AirPlay từ iPhone, máy tính cần cài một phần mềm AirPlay Receiver thật (khuyên dùng [uxplay-windows](https://github.com/leapbtw/uxplay-windows/releases) có khay hệ thống hoặc AirServer). Xem hướng dẫn chi tiết tại file `scripts/start_ios_airplay.bat`.
 * **Cách 3 (App iOS Native ReplayKit):**
   - Mở thư mục `ios-native/` bằng Xcode để cài app lên iPhone. App sẽ sử dụng Apple ReplayKit Broadcast Extension để quay toàn màn hình và gửi về PC qua mã PIN.
 

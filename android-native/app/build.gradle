@@ -41,7 +41,4 @@ dependencies {
 
     // Networking & WebSocket
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-
-    // Google WebRTC Android SDK
-    implementation 'io.getstream:stream-webrtc-android:1.1.1'
 }

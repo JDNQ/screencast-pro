@@ -22,6 +22,8 @@ class SampleHandler: RPBroadcastSampleHandler, URLSessionWebSocketDelegate {
 
     private var lastFrameTimestamp: Double = 0
     private let targetFrameInterval: Double = 1.0 / 30.0 // Throttle to 30 FPS to respect 50MB iOS extension memory limit
+    private var inFlightFrames = 0
+    private let maxInFlightFrames = 2 // Drop frames when network buffer has >= 2 frames to avoid memory exhaustion (< 50MB)
 
     override func broadcastStarted(withSetupInfo setupInfo: [String : NSObject]?) {
         let sharedDefaults = UserDefaults(suiteName: "group.com.screencast.app")
@@ -73,6 +75,11 @@ class SampleHandler: RPBroadcastSampleHandler, URLSessionWebSocketDelegate {
 
         switch sampleBufferType {
         case .video:
+            // Drop frame if network queue is busy to prevent memory accumulation
+            guard inFlightFrames < maxInFlightFrames else {
+                return
+            }
+
             let currentTime = CACurrentMediaTime()
             if currentTime - lastFrameTimestamp < targetFrameInterval {
                 return // Throttle frame rate
@@ -125,7 +132,10 @@ class SampleHandler: RPBroadcastSampleHandler, URLSessionWebSocketDelegate {
         }
 
         // Send raw binary frame directly over WebSocket (zero base64 overhead)
-        webSocketTask?.send(.data(jpegData)) { _ in }
+        inFlightFrames += 1
+        webSocketTask?.send(.data(jpegData)) { [weak self] _ in
+            self?.inFlightFrames = max(0, (self?.inFlightFrames ?? 1) - 1)
+        }
     }
 
     override func broadcastFinished() {

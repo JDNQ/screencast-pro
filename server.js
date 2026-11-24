@@ -82,7 +82,13 @@ app.use('/mobile', express.static(path.join(__dirname, 'mobile-client')));
 const sessions = new Map();
 const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes TTL for inactive sessions
 
-// Clean up stale sessions periodically to prevent memory leaks
+// Rate limiting for PIN verification to prevent brute-force attacks
+const verifyAttempts = new Map(); // ip -> { count, resetTime, blockedUntil }
+const MAX_VERIFY_ATTEMPTS = 8;
+const ATTEMPT_WINDOW_MS = 60 * 1000; // 1 minute
+const BLOCK_DURATION_MS = 30 * 1000; // 30 seconds block
+
+// Clean up stale sessions and rate limits periodically
 setInterval(() => {
     const now = Date.now();
     for (const [id, session] of sessions.entries()) {
@@ -90,6 +96,13 @@ setInterval(() => {
         if (isIdle && (now - session.lastActivity > SESSION_TTL_MS)) {
             sessions.delete(id);
             console.log(`[Session GC] Cleaned up expired session: ${id}`);
+        }
+    }
+
+    // Clean up expired IP rate limiting records
+    for (const [ip, record] of verifyAttempts.entries()) {
+        if (now > record.resetTime && (!record.blockedUntil || now > record.blockedUntil)) {
+            verifyAttempts.delete(ip);
         }
     }
 }, 60 * 1000);
@@ -157,12 +170,35 @@ app.get('/api/session/new', async (req, res) => {
     }
 });
 
-// API: Verify Session ID / PIN code
+// API: Verify Session ID / PIN code (with IP rate limiting)
 app.get('/api/session/verify', (req, res) => {
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+
+    let attemptRecord = verifyAttempts.get(clientIp);
+    if (!attemptRecord) {
+        attemptRecord = { count: 0, resetTime: now + ATTEMPT_WINDOW_MS, blockedUntil: 0 };
+        verifyAttempts.set(clientIp, attemptRecord);
+    } else if (now > attemptRecord.resetTime) {
+        attemptRecord.count = 0;
+        attemptRecord.resetTime = now + ATTEMPT_WINDOW_MS;
+    }
+
+    if (attemptRecord.blockedUntil && now < attemptRecord.blockedUntil) {
+        const remainingSec = Math.ceil((attemptRecord.blockedUntil - now) / 1000);
+        return res.status(429).json({
+            success: false,
+            error: `Quá nhiều lần thử sai. Vui lòng chờ ${remainingSec} giây rồi thử lại.`
+        });
+    }
+
     const rawId = req.query.id || '';
     const normalized = normalizeSessionId(rawId);
 
-    if (sessions.has(normalized)) {
+    if (normalized && sessions.has(normalized)) {
+        // Reset rate limit on successful authentication
+        verifyAttempts.delete(clientIp);
+
         const session = sessions.get(normalized);
         session.lastActivity = Date.now();
         res.json({
@@ -172,6 +208,11 @@ app.get('/api/session/verify', (req, res) => {
             receiverOnline: !!session.receiverWs
         });
     } else {
+        attemptRecord.count++;
+        if (attemptRecord.count >= MAX_VERIFY_ATTEMPTS) {
+            attemptRecord.blockedUntil = now + BLOCK_DURATION_MS;
+        }
+
         res.status(404).json({
             success: false,
             error: 'Mã kết nối không hợp lệ hoặc phiên đã hết hạn'
@@ -217,23 +258,21 @@ function setupWebSocket(wss) {
                         currentSessionId = normalizeSessionId(sessionId);
                         clientRole = data.role; // 'receiver' or 'sender'
                         
-                        let session = sessions.get(currentSessionId);
-                        if (!session) {
-                            session = {
-                                receiverWs: null,
-                                senderWs: null,
-                                receiverToken: receiverToken || null,
-                                createdAt: Date.now(),
-                                lastActivity: Date.now()
-                            };
-                            sessions.set(currentSessionId, session);
+                        if (!currentSessionId || !sessions.has(currentSessionId)) {
+                            ws.send(JSON.stringify({
+                                type: 'error',
+                                message: 'Phiên kết nối không tồn tại hoặc đã hết hạn'
+                            }));
+                            ws.close();
+                            return;
                         }
 
+                        const session = sessions.get(currentSessionId);
                         session.lastActivity = Date.now();
 
                         if (clientRole === 'receiver') {
-                            // Verify token if session already has one
-                            if (session.receiverToken && receiverToken && session.receiverToken !== receiverToken) {
+                            // Verify receiverToken strictly: reject if missing or mismatched
+                            if (session.receiverToken && session.receiverToken !== receiverToken) {
                                 ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized receiver token' }));
                                 ws.close();
                                 return;

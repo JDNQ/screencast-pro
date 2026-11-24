@@ -153,6 +153,8 @@ class ViewController: UIViewController {
 
             picker.centerXAnchor.constraint(equalTo: broadcastContainerView.centerXAnchor),
             picker.centerYAnchor.constraint(equalTo: broadcastContainerView.centerYAnchor),
+            picker.widthAnchor.constraint(equalToConstant: 60),
+            picker.heightAnchor.constraint(equalToConstant: 50),
 
             statusLabel.topAnchor.constraint(equalTo: broadcastContainerView.bottomAnchor, constant: 20),
             statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
@@ -192,6 +194,26 @@ class ViewController: UIViewController {
                 guard let self = self else { return }
                 if let error = error {
                     self.statusLabel.text = "❌ Không thể kết nối tới PC (\(error.localizedDescription))\nHãy kiểm tra xem PC và iPhone đã cùng mạng Wi-Fi chưa."
+                    return
+                }
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    self.statusLabel.text = "❌ Phản hồi từ máy chủ không hợp lệ"
+                    return
+                }
+
+                if httpResponse.statusCode == 404 {
+                    self.statusLabel.text = "❌ Mã PIN không chính xác hoặc phiên đã hết hạn"
+                    return
+                }
+
+                if httpResponse.statusCode == 429 {
+                    self.statusLabel.text = "⚠️ Quá nhiều lần thử sai. Vui lòng đợi 30 giây rồi thử lại."
+                    return
+                }
+
+                guard httpResponse.statusCode == 200 else {
+                    self.statusLabel.text = "❌ Máy chủ phản hồi mã lỗi: \(httpResponse.statusCode)"
                     return
                 }
 

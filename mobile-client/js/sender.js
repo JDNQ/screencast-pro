@@ -28,7 +28,30 @@ class ScreenCastSender {
 
         this.initDom();
         this.initEvents();
-        this.connectSignaling();
+        if (this.sessionId) {
+            this.verifyAndConnectSession(this.sessionId);
+        } else {
+            this.showPinEntry();
+        }
+    }
+
+    async verifyAndConnectSession(id) {
+        try {
+            const res = await fetch(`/api/session/verify?id=${encodeURIComponent(id)}`);
+            const data = await res.json();
+            if (data.success) {
+                this.sessionId = data.sessionId;
+                localStorage.setItem('screencast_last_id', this.sessionId);
+                this.updateSessionUI(this.sessionId);
+                this.connectSignaling();
+            } else {
+                localStorage.removeItem('screencast_last_id');
+                this.sessionId = '';
+                this.showPinEntry();
+            }
+        } catch (e) {
+            this.showPinEntry();
+        }
     }
 
     getSessionFromUrl() {
@@ -138,7 +161,10 @@ class ScreenCastSender {
     }
 
     connectSignaling() {
+        if (!this.sessionId) return;
+
         if (this.ws) {
+            this.ws.onclose = null;
             this.ws.close();
             this.ws = null;
         }
@@ -195,7 +221,7 @@ class ScreenCastSender {
             case 'receiver_ready':
                 this.setConnectionState(true, 'Đã ghép nối PC');
                 this.showToast('Máy tính đã sẵn sàng nhận hình ảnh!');
-                if (this.localStream && !this.peerConnection) {
+                if (this.localStream) {
                     this.initiatePeerCall();
                 }
                 break;

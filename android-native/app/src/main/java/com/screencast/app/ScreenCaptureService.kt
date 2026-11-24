@@ -142,8 +142,16 @@ class ScreenCaptureService : Service() {
         isStreaming = true
 
         val metrics = resources.displayMetrics
-        val width = 720
-        val height = 1280
+        val screenWidth = metrics.widthPixels
+        val screenHeight = metrics.heightPixels
+
+        // Maintain exact aspect ratio (e.g. 20:9, 19.5:9), scaling longest edge to at most 1280px
+        val maxDim = 1280f
+        val longestEdge = maxOf(screenWidth, screenHeight).toFloat()
+        val scale = if (longestEdge > maxDim) maxDim / longestEdge else 1.0f
+
+        val width = (((screenWidth * scale).toInt()) / 2) * 2 // ensure even dimension for encoding
+        val height = (((screenHeight * scale).toInt()) / 2) * 2
         val density = metrics.densityDpi
 
         imageHandlerThread = HandlerThread("ImageReaderThread").apply { start() }
