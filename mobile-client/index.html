@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ScreenCast Mobile Sender</title>
+    <link rel="stylesheet" href="css/mobile.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body class="mobile-body">
+    <!-- Mobile Header -->
+    <header class="mobile-header">
+        <div class="header-brand">
+            <span class="icon">📱</span>
+            <strong>ScreenCast Mobile</strong>
+        </div>
+        <div id="connectionBadge" class="conn-badge connecting">
+            <span class="dot"></span>
+            <span id="connStatusText">Đang kết nối PC...</span>
+        </div>
+    </header>
+
+    <main class="mobile-main">
+        <!-- Session Card -->
+        <div class="session-card">
+            <div class="session-info">
+                <span class="label">Mã phiên kết nối:</span>
+                <span id="sessionDisplay" class="session-tag">CAST-XXXXXX</span>
+            </div>
+            <div class="pc-target">
+                <span class="label">Máy tính đích:</span>
+                <span id="targetIpDisplay" class="ip-tag">Đang dò tìm...</span>
+            </div>
+        </div>
+
+        <!-- Mode Selector Cards -->
+        <section class="cast-modes">
+            <!-- Mode 1: Screen Share -->
+            <div class="mode-card primary-mode" id="btnShareScreen">
+                <div class="mode-icon">📺</div>
+                <div class="mode-details">
+                    <h3>Chiếu Toàn Màn Hình Điện Thoại</h3>
+                    <p class="warning-text">⚠️ Lưu ý: iOS Safari & Chrome Android chặn web quay màn hình ngoài. Nếu bị chặn, hãy xem hướng dẫn Native bên dưới.</p>
+                </div>
+                <div class="mode-action">
+                    <button class="btn-action">Bắt đầu</button>
+                </div>
+            </div>
+
+            <!-- Mode 2: HD Camera & Document Mirror -->
+            <div class="mode-card" id="btnShareCamera">
+                <div class="mode-icon">📷</div>
+                <div class="mode-details">
+                    <h3>Chiếu Camera HD & Tài Liệu</h3>
+                    <p>Chiếu camera trước/sau, tài liệu bàn làm việc với độ nét 1080p 60fps</p>
+                </div>
+                <div class="mode-action">
+                    <button class="btn-action outline">Bắt đầu</button>
+                </div>
+            </div>
+
+            <!-- Mode 3: Interactive Canvas / Photo Mirror -->
+            <div class="mode-card" id="btnShareCanvas">
+                <div class="mode-icon">🎨</div>
+                <div class="mode-details">
+                    <h3>Bảng Vẽ / Chiếu Ảnh Live</h3>
+                    <p>Vẽ tay và trình chiếu ảnh trực tiếp lên màn hình máy tính</p>
+                </div>
+                <div class="mode-action">
+                    <button class="btn-action outline">Bắt đầu</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Active Streaming Control Card (Hidden until streaming) -->
+        <div id="activeStreamCard" class="active-stream-card hidden">
+            <div class="stream-preview-wrapper">
+                <video id="localPreview" autoplay playsinline muted></video>
+                <canvas id="interactiveCanvas" class="hidden"></canvas>
+            </div>
+            
+            <div class="stream-stats-bar">
+                <span>Trạng thái: <strong class="green">ĐANG PHÁT LIVE</strong></span>
+                <span id="liveFpsText">60 FPS</span>
+            </div>
+
+            <!-- In-stream Controls -->
+            <div class="stream-controls">
+                <button id="btnSwitchCamera" class="ctrl-btn hidden">
+                    <span class="icon">🔄</span>
+                    <span>Đổi Camera</span>
+                </button>
+                <button id="btnToggleTorch" class="ctrl-btn hidden">
+                    <span class="icon">💡</span>
+                    <span>Đèn Flash</span>
+                </button>
+                <button id="btnClearCanvas" class="ctrl-btn hidden">
+                    <span class="icon">🧹</span>
+                    <span>Xoá Bảng</span>
+                </button>
+                <button id="btnStopStream" class="ctrl-btn stop-btn">
+                    <span class="icon">⏹️</span>
+                    <span>Dừng Chiếu</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Multi-Platform Pro Guidance Box (iOS & Android) -->
+        <div class="native-app-box">
+            <div class="native-header">
+                <span class="badge">HƯỚNG DẪN CHIẾU MÀN HÌNH THẬT</span>
+                <h4 id="platformTitle">Chiếu Toàn Bộ Màn Hình (iOS & Android)</h4>
+            </div>
+            <div id="iosGuidance" class="platform-info">
+                <p><strong>🍎 Đối với iPhone / iPad:</strong></p>
+                <ol class="platform-steps">
+                    <li>Vuốt từ góc trên bên phải màn hình xuống để mở <strong>Trung tâm điều khiển</strong>.</li>
+                    <li>Chạm vào biểu tượng 2 hình chữ nhật lồng nhau <strong>[Phản chiếu màn hình]</strong>.</li>
+                    <li>Chọn tên máy tính của bạn để chiếu toàn màn hình tức thì.</li>
+                </ol>
+                <small>Dự án mã nguồn ReplayKit cho iOS có sẵn tại thư mục <code>ios-native/</code>.</small>
+            </div>
+            <div id="androidGuidance" class="platform-info" style="margin-top: 10px;">
+                <p><strong>🤖 Đối với Android (Samsung, Xiaomi, Oppo...):</strong></p>
+                <ol class="platform-steps">
+                    <li>Kéo thanh thông báo xuống và chạm <strong>Smart View</strong> hoặc <strong>Phát màn hình</strong>.</li>
+                    <li>Hoặc sử dụng dự án mã nguồn MediaProjection tại thư mục <code>android-native/</code>.</li>
+                </ol>
+            </div>
+        </div>
+    </main>
+
+    <!-- Toast Notification -->
+    <div id="mobileToast" class="mobile-toast hidden"></div>
+
+    <script src="js/sender.js"></script>
+</body>
+</html>

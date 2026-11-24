@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScreenCast Pro - Multi Display Receiver</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body class="bg-dark text-slate">
+    <!-- Top Navigation Bar -->
+    <header class="app-header">
+        <div class="header-left">
+            <div class="logo-badge">
+                <span class="logo-icon">📡</span>
+                <span class="logo-text">ScreenCast <strong>Pro</strong></span>
+            </div>
+            <div class="version-tag">Multi Display v2.0</div>
+        </div>
+        <div class="header-center">
+            <div id="connectionStatus" class="status-pill waiting">
+                <span class="status-dot"></span>
+                <span id="statusText">Chờ kết nối thiết bị...</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="network-badge">
+                <span class="icon">📶</span>
+                <span id="networkIpDisplay">Đang tải IP...</span>
+            </div>
+            <button id="btnInfoModal" class="btn-icon" title="Hướng dẫn & Thông tin hệ thống">ℹ️</button>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="main-container">
+        <!-- Standby / Pairing Screen -->
+        <section id="pairingScreen" class="pairing-view">
+            <div class="pairing-card glass-panel">
+                <div class="pairing-header">
+                    <h2>Chiếu Màn Hình Điện Thoại Lên Máy Tính</h2>
+                    <p class="subtitle">Quét mã QR bằng camera điện thoại hoặc ứng dụng quét mã để kết nối ngay tức thì</p>
+                </div>
+
+                <div class="pairing-body">
+                    <!-- QR Box -->
+                    <div class="qr-container">
+                        <div class="qr-frame">
+                            <img id="qrImage" src="" alt="Mã QR kết nối" class="qr-code-img">
+                            <div id="qrLoading" class="qr-loader">
+                                <div class="spinner"></div>
+                                <span>Đang khởi tạo phiên...</span>
+                            </div>
+                        </div>
+                        <div class="qr-footer">
+                            <span class="session-label">MÃ PHIÊN:</span>
+                            <span id="sessionIdDisplay" class="session-code">CAST-XXXXXX</span>
+                            <button id="btnRefreshSession" class="btn-icon-small" title="Làm mới mã phiên">🔄</button>
+                        </div>
+                    </div>
+
+                    <!-- Steps Instructions -->
+                    <div class="instructions-container">
+                        <h3>Các bước thực hiện nhanh:</h3>
+                        <ol class="step-list">
+                            <li>
+                                <div class="step-num">1</div>
+                                <div class="step-content">
+                                    <strong>Đảm bảo cùng mạng Wi-Fi</strong>
+                                    <span>Điện thoại và máy tính phải kết nối chung 1 mạng Wi-Fi hoặc điểm truy cập (Hotspot).</span>
+                                </div>
+                            </li>
+                            <li>
+                                <div class="step-num">2</div>
+                                <div class="step-content">
+                                    <strong>Quét mã QR bằng Camera</strong>
+                                    <span>Mở ứng dụng Camera hoặc Zalo/Google Lens trên điện thoại để quét mã QR bên cạnh.</span>
+                                </div>
+                            </li>
+                            <li>
+                                <div class="step-num">3</div>
+                                <div class="step-content">
+                                    <strong>Chọn nguồn phát & Trải nghiệm</strong>
+                                    <span>Nhấn nút "Bắt đầu phát" trên màn hình điện thoại để truyền hình ảnh sắc nét, mượt mà.</span>
+                                </div>
+                            </li>
+                        </ol>
+
+                        <div class="direct-link-box">
+                            <span class="direct-link-label">Hoặc mở trình duyệt điện thoại truy cập:</span>
+                            <div class="link-input-group">
+                                <input type="text" id="manualUrlInput" readonly value="Đang tạo liên kết...">
+                                <button id="btnCopyUrl" class="btn-copy">Sao chép</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Methods Selection Tabs -->
+                <div class="solutions-bar">
+                    <div class="solution-item active" onclick="showHelpTab('web')">
+                        <span class="sol-icon">⚡</span>
+                        <div>
+                            <strong>Web Direct Cast</strong>
+                            <small>Quét QR bằng Camera</small>
+                        </div>
+                    </div>
+                    <div class="solution-item" onclick="showHelpTab('ios')">
+                        <span class="sol-icon">🍎</span>
+                        <div>
+                            <strong>Apple iOS (iPhone/iPad)</strong>
+                            <small>AirPlay & ReplayKit App</small>
+                        </div>
+                    </div>
+                    <div class="solution-item" onclick="showHelpTab('android')">
+                        <span class="sol-icon">🤖</span>
+                        <div>
+                            <strong>Android (SamSung/Xiaomi...)</strong>
+                            <small>Smart View & MediaProjection</small>
+                        </div>
+                    </div>
+                    <div class="solution-item" onclick="showHelpTab('scrcpy')">
+                        <span class="sol-icon">🚀</span>
+                        <div>
+                            <strong>Scrcpy Wi-Fi</strong>
+                            <small>Độ trễ thấp <15ms 60fps</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Guidance Drawer -->
+                <div id="guidanceDrawer" class="guidance-box">
+                    <div id="guideWeb" class="guide-pane active">
+                        <h4>💡 Cơ chế hoạt động của Web Cast:</h4>
+                        <p>Trình duyệt di động (Safari trên iOS và Chrome trên Android) được bảo vệ bởi sandbox hệ điều hành nên <strong>chặn quay toàn bộ màn hình ngoài</strong> để bảo mật mật khẩu và tin nhắn riêng tư. Chế độ Web phù hợp nhất để: <strong>chiếu camera độ nét cao, soi tài liệu bàn làm việc, và bảng vẽ tương tác trực tiếp</strong>.</p>
+                    </div>
+                    <div id="guideIos" class="guide-pane hidden">
+                        <h4>🍎 Dành Cho iPhone & iPad (Chiếu Màn Hình Thật 60 FPS):</h4>
+                        <ul>
+                            <li><strong>Cách 1 (Không cần cài app - Khuyên dùng):</strong>
+                                Vuốt từ góc trên bên phải màn hình iPhone xuống để mở <strong>Trung tâm điều khiển (Control Center)</strong> -> Chạm vào biểu tượng 2 hình chữ nhật lồng nhau <strong>[Phản chiếu màn hình / Screen Mirroring]</strong> -> Chọn tên máy tính của bạn.
+                            </li>
+                            <li><strong>Cách 2 (Ứng dụng Native iOS ReplayKit):</strong>
+                                Nhóm đã cung cấp sẵn dự án Xcode Swift tại thư mục <code>ios-native/</code> tích hợp ReplayKit Broadcast Extension để truyền toàn màn hình qua WebSocket/WebRTC.
+                            </li>
+                        </ul>
+                    </div>
+                    <div id="guideAndroid" class="guide-pane hidden">
+                        <h4>🤖 Dành Cho Điện Thoại Android (Chiếu Toàn Màn Hình):</h4>
+                        <ul>
+                            <li><strong>Cách 1 (Không cần cài app):</strong> Bấm <code>Win + K</code> trên máy tính Windows. Trên điện thoại, kéo thanh cài đặt nhanh xuống -> Chọn <strong>Smart View</strong> (Samsung) hoặc <strong>Phát màn hình / Cast</strong> (Xiaomi, Oppo, Realme, Pixel...).</li>
+                            <li><strong>Cách 2 (App Android Native):</strong> Mở thư mục <code>android-native/</code> bằng Android Studio để cài ứng dụng ScreenCast Pro MediaProjection.</li>
+                        </ul>
+                    </div>
+                    <div id="guideScrcpy" class="guide-pane hidden">
+                        <h4>🚀 Scrcpy Wi-Fi Debugging Tốc Độ Cao:</h4>
+                        <p>Bật tính năng <em>Gỡ lỗi không dây (Wireless Debugging)</em> trên Android 11+ và chạy file <code>scripts/scrcpy_wireless_pair.bat</code> để trải nghiệm độ trễ siêu thấp dưới 15ms.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Active Streaming View (Hidden initially) -->
+        <section id="streamingView" class="streaming-view hidden">
+            <!-- Video Display Container -->
+            <div id="videoWrapper" class="video-wrapper">
+                <video id="remoteVideo" autoplay playsinline></video>
+                <canvas id="fallbackCanvas" class="hidden"></canvas>
+
+                <!-- Stream Diagnostics Overlay -->
+                <div id="statsOverlay" class="stats-overlay">
+                    <div class="stat-item"><span class="label">FPS:</span> <span id="statFps" class="val">60</span></div>
+                    <div class="stat-item"><span class="label">Độ trễ:</span> <span id="statLatency" class="val">~18ms</span></div>
+                    <div class="stat-item"><span class="label">Độ phân giải:</span> <span id="statResolution" class="val">1080x2400</span></div>
+                    <div class="stat-item"><span class="label">Giao thức:</span> <span class="val green">WebRTC P2P</span></div>
+                </div>
+
+                <!-- Floating Toolbar -->
+                <div class="floating-toolbar">
+                    <button id="btnRotate" class="tool-btn" title="Xoay màn hình (90°)">
+                        <span class="icon">🔄</span>
+                        <span class="btn-label">Xoay</span>
+                    </button>
+                    <button id="btnSnapshot" class="tool-btn" title="Chụp ảnh màn hình">
+                        <span class="icon">📸</span>
+                        <span class="btn-label">Chụp ảnh</span>
+                    </button>
+                    <button id="btnRecord" class="tool-btn" title="Ghi video màn hình">
+                        <span class="icon">⏺️</span>
+                        <span id="recordLabel" class="btn-label">Ghi hình</span>
+                    </button>
+                    <button id="btnToggleAudio" class="tool-btn" title="Bật/Tắt âm thanh">
+                        <span class="icon">🔊</span>
+                        <span class="btn-label">Âm thanh</span>
+                    </button>
+                    <button id="btnFitMode" class="tool-btn" title="Đổi chế độ co giãn (Fit/Fill)">
+                        <span class="icon">↔️</span>
+                        <span class="btn-label">Tỷ lệ</span>
+                    </button>
+                    <button id="btnFullscreen" class="tool-btn" title="Toàn màn hình (F11)">
+                        <span class="icon">⛶</span>
+                        <span class="btn-label">Toàn màn</span>
+                    </button>
+                    <button id="btnDisconnect" class="tool-btn danger" title="Ngắt kết nối">
+                        <span class="icon">🔌</span>
+                        <span class="btn-label">Ngắt kết nối</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Info / Help Modal -->
+    <div id="infoModal" class="modal hidden">
+        <div class="modal-content glass-panel">
+            <div class="modal-header">
+                <h3>Về Hệ Thống ScreenCast Pro</h3>
+                <button id="btnCloseModal" class="btn-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p><strong>ScreenCast Pro</strong> là hệ thống giải pháp chia sẻ màn hình không dây đa nền tảng từ điện thoại lên máy tính được thiết kế theo tiêu chuẩn kỹ thuật chuyên nghiệp:</p>
+                <ul>
+                    <li><strong>Công nghệ truyền phát:</strong> WebRTC P2P (Peer-to-Peer) phần cứng được tăng tốc với WebSockets Signaling.</li>
+                    <li><strong>Bảo mật:</strong> Tự động kích hoạt SSL/TLS nội bộ cho mạng LAN, đảm bảo quyền truy cập Camera/Màn hình được cấp phép.</li>
+                    <li><strong>Hỗ trợ đa chế độ:</strong>
+                        <ol>
+                            <li><strong>Web Cast:</strong> Dùng ngay trên trình duyệt điện thoại không cần cài app.</li>
+                            <li><strong>Android Native App:</strong> Sử dụng MediaProjection API để mirror toàn màn hình hệ thống Android bao gồm game, video, tài liệu.</li>
+                            <li><strong>Wireless Scrcpy:</strong> Công cụ kết nối không dây siêu tốc 60fps dành cho kỹ sư và lập trình viên.</li>
+                        </ol>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
