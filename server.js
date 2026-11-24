@@ -66,9 +66,18 @@ function generateSessionId() {
     return 'CAST-' + Math.floor(100000 + Math.random() * 900000);
 }
 
+function normalizeSessionId(id) {
+    if (!id) return '';
+    const clean = id.toString().trim().toUpperCase();
+    if (clean.startsWith('CAST-')) return clean;
+    if (/^\d{6}$/.test(clean)) return 'CAST-' + clean;
+    return clean;
+}
+
 // API: Get server connection info and QR code
 app.get('/api/session/new', async (req, res) => {
     const sessionId = generateSessionId();
+    const pin = sessionId.replace('CAST-', '');
     sessions.set(sessionId, {
         receiverWs: null,
         senderWs: null,
@@ -78,6 +87,7 @@ app.get('/api/session/new', async (req, res) => {
     // Mobile URL will use HTTPS so browser allows camera/screen capture APIs
     const mobileUrl = `https://${LAN_IP}:${HTTPS_PORT}/mobile/?session=${sessionId}`;
     const httpFallbackUrl = `http://${LAN_IP}:${HTTP_PORT}/mobile/?session=${sessionId}`;
+    const directMobileUrl = `https://${LAN_IP}:${HTTPS_PORT}/mobile`;
     
     try {
         const qrDataUrl = await QRCode.toDataURL(mobileUrl, {
@@ -93,15 +103,38 @@ app.get('/api/session/new', async (req, res) => {
         res.json({
             success: true,
             sessionId,
+            pin,
             lanIp: LAN_IP,
             httpPort: HTTP_PORT,
             httpsPort: HTTPS_PORT,
             mobileUrl,
             httpFallbackUrl,
+            directMobileUrl,
             qrCode: qrDataUrl
         });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// API: Verify Session ID / PIN code
+app.get('/api/session/verify', (req, res) => {
+    const rawId = req.query.id || '';
+    const normalized = normalizeSessionId(rawId);
+
+    if (sessions.has(normalized)) {
+        const session = sessions.get(normalized);
+        res.json({
+            success: true,
+            sessionId: normalized,
+            pin: normalized.replace('CAST-', ''),
+            receiverOnline: !!session.receiverWs
+        });
+    } else {
+        res.status(404).json({
+            success: false,
+            error: 'Mã kết nối không hợp lệ hoặc máy tính chưa sẵn sàng'
+        });
     }
 });
 
@@ -128,19 +161,19 @@ function setupWebSocket(wss) {
 
                 switch (type) {
                     case 'register': {
-                        currentSessionId = sessionId;
+                        currentSessionId = normalizeSessionId(sessionId);
                         clientRole = data.role; // 'receiver' or 'sender'
                         
-                        let session = sessions.get(sessionId);
+                        let session = sessions.get(currentSessionId);
                         if (!session) {
                             session = { receiverWs: null, senderWs: null, createdAt: Date.now() };
-                            sessions.set(sessionId, session);
+                            sessions.set(currentSessionId, session);
                         }
 
                         if (clientRole === 'receiver') {
                             session.receiverWs = ws;
-                            console.log(`[Session ${sessionId}] PC Receiver connected.`);
-                            ws.send(JSON.stringify({ type: 'registered', role: 'receiver' }));
+                            console.log(`[Session ${currentSessionId}] PC Receiver connected.`);
+                            ws.send(JSON.stringify({ type: 'registered', role: 'receiver', sessionId: currentSessionId }));
                             
                             // If sender is already waiting, notify both
                             if (session.senderWs && session.senderWs.readyState === WebSocket.OPEN) {
@@ -149,8 +182,8 @@ function setupWebSocket(wss) {
                             }
                         } else if (clientRole === 'sender') {
                             session.senderWs = ws;
-                            console.log(`[Session ${sessionId}] Mobile Sender connected.`);
-                            ws.send(JSON.stringify({ type: 'registered', role: 'sender' }));
+                            console.log(`[Session ${currentSessionId}] Mobile Sender connected via ID.`);
+                            ws.send(JSON.stringify({ type: 'registered', role: 'sender', sessionId: currentSessionId }));
 
                             if (session.receiverWs && session.receiverWs.readyState === WebSocket.OPEN) {
                                 session.receiverWs.send(JSON.stringify({ type: 'sender_ready' }));

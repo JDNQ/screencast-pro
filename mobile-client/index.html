@@ -23,15 +23,29 @@
     </header>
 
     <main class="mobile-main">
+        <!-- ID / PIN Code Entry Card -->
+        <div id="pinEntryCard" class="pin-entry-card">
+            <div class="pin-entry-header">
+                <span class="icon">🔑</span>
+                <div>
+                    <h3>Nhập Mã Kết Nối (Cast ID / PIN)</h3>
+                    <p class="pin-sub">Nhập mã hiển thị trên máy tính (Không cần quét camera):</p>
+                </div>
+            </div>
+            <div class="pin-input-row">
+                <input type="text" id="inputPinCode" maxlength="11" placeholder="VD: 849201" autocomplete="off" autocorrect="off" autocapitalize="characters">
+                <button id="btnConnectPin" class="btn-connect-pin">Kết Nối</button>
+            </div>
+        </div>
+
         <!-- Session Card -->
-        <div class="session-card">
+        <div id="activeSessionCard" class="session-card hidden">
             <div class="session-info">
-                <span class="label">Mã phiên kết nối:</span>
+                <span class="label">Mã phiên hiện tại:</span>
                 <span id="sessionDisplay" class="session-tag">CAST-XXXXXX</span>
             </div>
-            <div class="pc-target">
-                <span class="label">Máy tính đích:</span>
-                <span id="targetIpDisplay" class="ip-tag">Đang dò tìm...</span>
+            <div class="session-actions">
+                <button id="btnChangePin" class="btn-small-link">Đổi mã ID</button>
             </div>
         </div>
 

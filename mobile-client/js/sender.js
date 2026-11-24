@@ -33,7 +33,7 @@ class ScreenCastSender {
 
     getSessionFromUrl() {
         const params = new URLSearchParams(window.location.search);
-        return params.get('session') || 'CAST-DEMO';
+        return params.get('session') || localStorage.getItem('screencast_last_id') || '';
     }
 
     initDom() {
@@ -41,7 +41,11 @@ class ScreenCastSender {
             connectionBadge: document.getElementById('connectionBadge'),
             connStatusText: document.getElementById('connStatusText'),
             sessionDisplay: document.getElementById('sessionDisplay'),
-            targetIpDisplay: document.getElementById('targetIpDisplay'),
+            pinEntryCard: document.getElementById('pinEntryCard'),
+            inputPinCode: document.getElementById('inputPinCode'),
+            btnConnectPin: document.getElementById('btnConnectPin'),
+            activeSessionCard: document.getElementById('activeSessionCard'),
+            btnChangePin: document.getElementById('btnChangePin'),
             btnShareScreen: document.getElementById('btnShareScreen'),
             btnShareCamera: document.getElementById('btnShareCamera'),
             btnShareCanvas: document.getElementById('btnShareCanvas'),
@@ -55,8 +59,11 @@ class ScreenCastSender {
             mobileToast: document.getElementById('mobileToast')
         };
 
-        this.dom.sessionDisplay.textContent = this.sessionId;
-        this.dom.targetIpDisplay.textContent = window.location.hostname;
+        if (this.sessionId) {
+            this.updateSessionUI(this.sessionId);
+        } else {
+            this.showPinEntry();
+        }
 
         // Auto-detect iOS vs Android
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -74,6 +81,12 @@ class ScreenCastSender {
     }
 
     initEvents() {
+        this.dom.btnConnectPin.addEventListener('click', () => this.connectWithPin());
+        this.dom.btnChangePin.addEventListener('click', () => this.showPinEntry());
+        this.dom.inputPinCode.addEventListener('keyup', (e) => {
+            if (e.key === 'Enter') this.connectWithPin();
+        });
+
         this.dom.btnShareScreen.addEventListener('click', () => this.startScreenShare());
         this.dom.btnShareCamera.addEventListener('click', () => this.startCameraShare());
         this.dom.btnShareCanvas.addEventListener('click', () => this.startCanvasShare());
@@ -83,6 +96,45 @@ class ScreenCastSender {
         this.dom.btnClearCanvas.addEventListener('click', () => this.clearCanvas());
 
         this.setupCanvasDrawing();
+    }
+
+    async connectWithPin() {
+        const raw = this.dom.inputPinCode.value.trim().toUpperCase();
+        if (!raw) {
+            this.showToast('Vui lòng nhập Mã ID hiển thị trên máy tính!');
+            return;
+        }
+
+        this.showToast('Đang kiểm tra mã kết nối...');
+        try {
+            const res = await fetch(`/api/session/verify?id=${encodeURIComponent(raw)}`);
+            const data = await res.json();
+
+            if (!data.success) {
+                throw new Error(data.error || 'Mã ID không hợp lệ');
+            }
+
+            this.sessionId = data.sessionId;
+            localStorage.setItem('screencast_last_id', this.sessionId);
+            this.updateSessionUI(this.sessionId);
+            this.connectSignaling();
+            this.showToast(`✅ Kết nối thành công tới PC (${data.pin})!`);
+        } catch (e) {
+            this.showToast('❌ ' + e.message, 4000);
+        }
+    }
+
+    showPinEntry() {
+        this.dom.pinEntryCard.classList.remove('hidden');
+        this.dom.activeSessionCard.classList.add('hidden');
+        this.dom.inputPinCode.focus();
+        this.setConnectionState(false, 'Chờ nhập mã ID');
+    }
+
+    updateSessionUI(sessionId) {
+        this.dom.sessionDisplay.textContent = sessionId;
+        this.dom.pinEntryCard.classList.add('hidden');
+        this.dom.activeSessionCard.classList.remove('hidden');
     }
 
     connectSignaling() {

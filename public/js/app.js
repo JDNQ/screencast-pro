@@ -38,6 +38,9 @@ class ScreenCastReceiver {
             networkIpDisplay: document.getElementById('networkIpDisplay'),
             pairingScreen: document.getElementById('pairingScreen'),
             streamingView: document.getElementById('streamingView'),
+            pinDisplayBig: document.getElementById('pinDisplayBig'),
+            btnCopyPin: document.getElementById('btnCopyPin'),
+            quickWebLink: document.getElementById('quickWebLink'),
             qrImage: document.getElementById('qrImage'),
             qrLoading: document.getElementById('qrLoading'),
             sessionIdDisplay: document.getElementById('sessionIdDisplay'),
@@ -66,6 +69,9 @@ class ScreenCastReceiver {
     initEventListeners() {
         this.dom.btnRefreshSession.addEventListener('click', () => this.startSession());
         this.dom.btnCopyUrl.addEventListener('click', () => this.copyUrlToClipboard());
+        if (this.dom.btnCopyPin) {
+            this.dom.btnCopyPin.addEventListener('click', () => this.copyPinToClipboard());
+        }
 
         this.dom.btnRotate.addEventListener('click', () => this.rotateVideo());
         this.dom.btnSnapshot.addEventListener('click', () => this.takeSnapshot());
@@ -98,6 +104,12 @@ class ScreenCastReceiver {
 
             this.sessionId = data.sessionId;
             this.dom.sessionIdDisplay.textContent = this.sessionId;
+            if (this.dom.pinDisplayBig) {
+                this.dom.pinDisplayBig.textContent = data.pin || data.sessionId.replace('CAST-', '');
+            }
+            if (this.dom.quickWebLink) {
+                this.dom.quickWebLink.textContent = data.directMobileUrl || (window.location.origin + '/mobile');
+            }
             this.dom.networkIpDisplay.textContent = `${data.lanIp}:${data.httpPort}`;
             this.dom.manualUrlInput.value = data.mobileUrl;
 
@@ -444,6 +456,15 @@ class ScreenCastReceiver {
         navigator.clipboard.writeText(this.dom.manualUrlInput.value).then(() => {
             this.showToast('Đã sao chép liên kết vào bộ nhớ tạm!', 'success');
         });
+    }
+
+    copyPinToClipboard() {
+        const pin = this.dom.pinDisplayBig ? this.dom.pinDisplayBig.textContent : '';
+        if (pin) {
+            navigator.clipboard.writeText(pin).then(() => {
+                this.showToast(`Đã sao chép mã PIN: ${pin}`, 'success');
+            });
+        }
     }
 
     showToast(message, type = 'info') {

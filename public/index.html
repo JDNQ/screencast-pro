@@ -41,7 +41,19 @@
             <div class="pairing-card glass-panel">
                 <div class="pairing-header">
                     <h2>Chiếu Màn Hình Điện Thoại Lên Máy Tính</h2>
-                    <p class="subtitle">Quét mã QR bằng camera điện thoại hoặc ứng dụng quét mã để kết nối ngay tức thì</p>
+                    <p class="subtitle">Kết nối nhanh bằng <strong>Mã ID 6 chữ số</strong> (Dành cho iOS & Android) hoặc Quét mã QR</p>
+                </div>
+
+                <!-- Big Cast PIN Card -->
+                <div class="pin-highlight-box">
+                    <div class="pin-label">🔑 MÃ ID KẾT NỐI (CAST PIN)</div>
+                    <div class="pin-code-row">
+                        <span id="pinDisplayBig" class="pin-big-text">------</span>
+                        <button id="btnCopyPin" class="btn-copy-pin" title="Sao chép mã ID">📋 Sao chép</button>
+                    </div>
+                    <div class="pin-hint">
+                        🍎 <strong>Dành cho iPhone/iPad:</strong> Mở trình duyệt điện thoại truy cập địa chỉ bên dưới và nhập mã PIN này để kết nối ngay lập tức!
+                    </div>
                 </div>
 
                 <div class="pairing-body">
@@ -63,33 +75,33 @@
 
                     <!-- Steps Instructions -->
                     <div class="instructions-container">
-                        <h3>Các bước thực hiện nhanh:</h3>
+                        <h3>Cách kết nối bằng Mã ID (Không cần quét mã):</h3>
                         <ol class="step-list">
                             <li>
                                 <div class="step-num">1</div>
                                 <div class="step-content">
                                     <strong>Đảm bảo cùng mạng Wi-Fi</strong>
-                                    <span>Điện thoại và máy tính phải kết nối chung 1 mạng Wi-Fi hoặc điểm truy cập (Hotspot).</span>
+                                    <span>Điện thoại và máy tính phải kết nối chung 1 mạng Wi-Fi.</span>
                                 </div>
                             </li>
                             <li>
                                 <div class="step-num">2</div>
                                 <div class="step-content">
-                                    <strong>Quét mã QR bằng Camera</strong>
-                                    <span>Mở ứng dụng Camera hoặc Zalo/Google Lens trên điện thoại để quét mã QR bên cạnh.</span>
+                                    <strong>Mở trình duyệt trên iPhone / Android</strong>
+                                    <span>Truy cập địa chỉ: <code id="quickWebLink" class="accent-link">Đang tải...</code></span>
                                 </div>
                             </li>
                             <li>
                                 <div class="step-num">3</div>
                                 <div class="step-content">
-                                    <strong>Chọn nguồn phát & Trải nghiệm</strong>
-                                    <span>Nhấn nút "Bắt đầu phát" trên màn hình điện thoại để truyền hình ảnh sắc nét, mượt mà.</span>
+                                    <strong>Nhập Mã ID & Bắt đầu chiếu</strong>
+                                    <span>Nhập mã 6 chữ số hiển thị ở trên để ghép nối tức thì mà không cần camera quét mã!</span>
                                 </div>
                             </li>
                         </ol>
 
                         <div class="direct-link-box">
-                            <span class="direct-link-label">Hoặc mở trình duyệt điện thoại truy cập:</span>
+                            <span class="direct-link-label">Đường dẫn truy cập trên điện thoại:</span>
                             <div class="link-input-group">
                                 <input type="text" id="manualUrlInput" readonly value="Đang tạo liên kết...">
                                 <button id="btnCopyUrl" class="btn-copy">Sao chép</button>

@@ -218,6 +218,72 @@ body {
     font-size: 0.95rem;
 }
 
+/* PIN Highlight Card */
+.pin-highlight-box {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(129, 140, 248, 0.12));
+    border: 2px solid var(--primary);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 0 30px rgba(56, 189, 248, 0.2);
+}
+
+.pin-label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+}
+
+.pin-code-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.pin-big-text {
+    font-family: var(--font-mono);
+    font-size: 2.4rem;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: 0.15em;
+    text-shadow: 0 0 15px var(--primary);
+}
+
+.btn-copy-pin {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border-glass);
+    color: var(--primary);
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-copy-pin:hover {
+    background: var(--primary);
+    color: #0f172a;
+}
+
+.pin-hint {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.accent-link {
+    background: rgba(56, 189, 248, 0.15);
+    color: var(--primary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
 .pairing-body {
     display: grid;
     grid-template-columns: 340px 1fr;

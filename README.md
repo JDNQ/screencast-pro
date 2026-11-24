@@ -6,10 +6,11 @@
 
 ## 🌟 Tính Năng Nổi Bật
 
-1. **Quét mã QR tức thì (Zero-Friction QR Pairing):**
-   - Chỉ cần mở camera điện thoại (iPhone hoặc Android) quét mã QR hiển thị trên máy tính là kết nối ngay lập tức.
+1. **Kết nối linh hoạt bằng Mã ID (PIN Code 6 chữ số) hoặc Quét mã QR:**
+   - **Dành riêng cho iOS (iPhone/iPad):** Không cần dùng camera quét mã, chỉ cần mở Safari hoặc App nhập mã ID 6 chữ số hiển thị trên màn hình PC để kết nối trực tiếp.
+   - **Dành cho Android & Khác:** Quét mã QR tự động ghép nối tức thì.
 2. **Hỗ trợ đa nền tảng toàn diện (iOS & Android):**
-   - **Apple iOS (iPhone / iPad):** Hướng dẫn AirPlay Screen Mirroring 60fps và dự án Xcode Swift ReplayKit (`ios-native/`).
+   - **Apple iOS (iPhone / iPad):** Hỗ trợ ghép nối qua Mã ID/PIN kết hợp ReplayKit Broadcast Extension (`ios-native/`) và quảng bá mDNS Bonjour.
    - **Android (Samsung, Xiaomi, Oppo, Pixel...):** Hỗ trợ Smart View, dự án Android Native MediaProjection (`android-native/`) và Scrcpy Wi-Fi.
 3. **Giao thức WebRTC P2P tốc độ cao:**
    - Truyền dữ liệu trực tiếp trong mạng LAN nội bộ, không phụ thuộc vào internet bên ngoài, bảo mật tối đa.
